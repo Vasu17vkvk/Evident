@@ -152,7 +152,7 @@ export function Nav() {
                 Sign in
               </Link>
               <Link
-                to="/pricing"
+                to="/signin"
                 className={cn(buttonVariants({ variant: "default", size: "sm" }))}
               >
                 Get started
