@@ -23,6 +23,7 @@ const PLAN_FEATURES = {
 
 export function Account() {
   const { user, isAuthenticated } = useAuth();
+  const { updateName } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>("Profile");
 
@@ -186,7 +187,14 @@ export function Account() {
 
                     <div className="flex justify-end border-t border-border pt-5">
                       <button
-                        onClick={() => simulateSave("Profile updated successfully!")}
+                        onClick={() => {
+                          if (!displayName.trim()) {
+                            toast.error("Display name cannot be empty");
+                            return;
+                          }
+                          updateName(displayName);
+                          simulateSave("Profile updated successfully!");
+                        }}
                         disabled={isSaving}
                         className="font-mono-label text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-accent/80 px-5 py-2.5 transition-colors disabled:opacity-60"
                       >

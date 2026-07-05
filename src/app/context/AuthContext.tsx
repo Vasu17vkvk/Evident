@@ -10,6 +10,7 @@ interface AuthContextType {
   user: AuthUser | null;
   signIn: (email: string) => void;
   signOut: () => void;
+  updateName: (name: string) => void;
   isAuthenticated: boolean;
 }
 
@@ -39,8 +40,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const updateName = useCallback((name: string) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const parts = name.trim().split(/\s+/);
+      const initials = parts
+        .slice(0, 2)
+        .map((p) => p.charAt(0).toUpperCase())
+        .join("");
+      return { ...prev, name: name.trim(), initials };
+    });
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, signIn, signOut, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, signIn, signOut, updateName, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );
