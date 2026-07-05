@@ -50,6 +50,34 @@ function Button({
   const showPrimaryUnderline = variant === "default" || variant === "destructive" || variant === undefined;
   const showGhostUnderline = variant === "ghost";
 
+  if (asChild && React.isValidElement(children)) {
+    return (
+      <Comp
+        data-slot="button"
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      >
+        {React.cloneElement(children as React.ReactElement<any>, {}, (
+          <>
+            {children.props.children}
+            {showPrimaryUnderline && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-0 left-0 h-0.5 w-full origin-left bg-accent transition-transform duration-150 group-hover:scale-x-110"
+              />
+            )}
+            {showGhostUnderline && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-0 left-0 h-px w-full origin-left scale-x-0 bg-foreground transition-transform duration-150 group-hover:scale-x-100"
+              />
+            )}
+          </>
+        ))}
+      </Comp>
+    );
+  }
+
   return (
     <Comp
       data-slot="button"

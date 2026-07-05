@@ -1,13 +1,29 @@
+import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
-import { Button } from "../ui/button";
+import { Button, buttonVariants } from "../ui/button";
 import { Input } from "../ui/input";
 import { Container } from "../layout/Container";
 import { FadeIn } from "../layout/FadeIn";
+import { cn } from "../ui/utils";
 
 const FOOTER_LINKS = {
-  Product: ["Features", "Pricing", "Changelog", "API"],
-  Company: ["About", "Blog", "Careers", "Contact"],
-  Legal: ["Privacy", "Terms", "Security"],
+  Product: [
+    { label: "Features", path: "/#features", isAnchor: true },
+    { label: "Pricing", path: "/pricing", isAnchor: false },
+    { label: "Changelog", path: "#", isAnchor: true },
+    { label: "API", path: "/docs", isAnchor: false },
+  ],
+  Company: [
+    { label: "About", path: "/#about", isAnchor: true },
+    { label: "Blog", path: "/blog", isAnchor: false },
+    { label: "Careers", path: "#", isAnchor: true },
+    { label: "Contact", path: "#", isAnchor: true },
+  ],
+  Legal: [
+    { label: "Privacy", path: "#", isAnchor: true },
+    { label: "Terms", path: "#", isAnchor: true },
+    { label: "Security", path: "#", isAnchor: true },
+  ],
 };
 
 export function Footer() {
@@ -33,19 +49,22 @@ export function Footer() {
               placeholder="you@company.com"
               className="h-12 border-background/30 bg-transparent text-background placeholder:text-background/50 focus-visible:border-accent md:h-14 md:flex-1"
             />
-            <Button
-              variant="outline"
-              className="border-background text-background hover:bg-background hover:text-foreground"
+            <Link
+              to="/pricing"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "border-background text-background hover:bg-background hover:text-foreground flex items-center justify-center gap-2"
+              )}
             >
               Request access
               <ArrowRight className="size-4" strokeWidth={1.5} />
-            </Button>
+            </Link>
           </form>
         </FadeIn>
 
         <div className="grid grid-cols-2 gap-10 border-t border-background/20 pt-12 md:grid-cols-4 lg:grid-cols-5">
           <div className="col-span-2 md:col-span-1">
-            <p className="text-sm font-semibold tracking-tight">Copilot</p>
+            <p className="text-sm font-semibold tracking-tight">Evident</p>
             <p className="mt-2 text-xs leading-relaxed text-background/50">
               AI document intelligence with verified citations.
             </p>
@@ -57,13 +76,22 @@ export function Footer() {
               </p>
               <ul className="flex flex-col gap-2">
                 {links.map((link) => (
-                  <li key={link}>
-                    <a
-                      href="#"
-                      className="text-xs text-background/70 transition-colors duration-150 hover:text-background"
-                    >
-                      {link}
-                    </a>
+                  <li key={link.label}>
+                    {link.isAnchor ? (
+                      <a
+                        href={link.path}
+                        className="text-xs text-background/70 transition-colors duration-150 hover:text-background"
+                      >
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        to={link.path}
+                        className="text-xs text-background/70 transition-colors duration-150 hover:text-background"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -73,7 +101,7 @@ export function Footer() {
 
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-background/20 pt-8 sm:flex-row sm:items-center">
           <p className="font-mono-label text-[10px] text-background/40">
-            © 2026 AI Document Copilot
+            © 2026 Evident AI Document Copilot
           </p>
           <p className="font-mono-label text-[10px] text-background/40">
             Built with Bold Typography
@@ -83,3 +111,4 @@ export function Footer() {
     </footer>
   );
 }
+
