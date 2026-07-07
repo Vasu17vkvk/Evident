@@ -6,43 +6,43 @@
   --font-display: "Playfair Display", Georgia, serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
 
-  --background: #0a0a0a;
-  --foreground: #fafafa;
-  --card: #0f0f0f;
-  --card-foreground: #fafafa;
-  --popover: #0f0f0f;
-  --popover-foreground: #fafafa;
+  --background: #fbfbfb;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
   --primary: #ff3d00;
-  --primary-foreground: #0a0a0a;
-  --secondary: #1a1a1a;
-  --secondary-foreground: #fafafa;
-  --muted: #1a1a1a;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #09090b;
+  --muted: #f4f4f5;
   --muted-foreground: #737373;
   --accent: #ff3d00;
-  --accent-foreground: #0a0a0a;
+  --accent-foreground: #ffffff;
   --destructive: #ff3d00;
-  --destructive-foreground: #0a0a0a;
-  --border: #262626;
-  --border-hover: #404040;
-  --input: #1a1a1a;
-  --input-background: #1a1a1a;
-  --switch-background: #262626;
+  --destructive-foreground: #ffffff;
+  --border: #e4e4e7;
+  --border-hover: #cbd5e1;
+  --input: #f4f4f5;
+  --input-background: #ffffff;
+  --switch-background: #e4e4e7;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --ring: #ff3d00;
   --radius: 0px;
   --chart-1: #ff3d00;
   --chart-2: #737373;
-  --chart-3: #fafafa;
-  --chart-4: #262626;
-  --chart-5: #1a1a1a;
-  --sidebar: #0f0f0f;
-  --sidebar-foreground: #fafafa;
+  --chart-3: #09090b;
+  --chart-4: #e4e4e7;
+  --chart-5: #f4f4f5;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #09090b;
   --sidebar-primary: #ff3d00;
-  --sidebar-primary-foreground: #0a0a0a;
-  --sidebar-accent: #1a1a1a;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: #262626;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #09090b;
+  --sidebar-border: #e4e4e7;
   --sidebar-ring: #ff3d00;
 
   --tracking-tighter: -0.06em;
@@ -73,7 +73,12 @@
   --border: #262626;
   --border-hover: #404040;
   --input: #1a1a1a;
+  --input-background: #1a1a1a;
+  --switch-background: #262626;
   --ring: #ff3d00;
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: #fafafa;
+  --sidebar-border: #262626;
 }
 
 @theme inline {
@@ -136,11 +141,19 @@
 
   html {
     font-size: var(--font-size);
+    height: 100%;
+    margin: 0;
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
     letter-spacing: var(--tracking-normal);
+    height: 100%;
+    margin: 0;
+  }
+
+  #root {
+    height: 100%;
   }
 
   h1,
@@ -198,4 +211,20 @@
     background-repeat: repeat;
     background-size: 128px 128px;
   }
+}
+
+/* Custom scrollbar styling to look clean and dark */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #ff3d00;
 }

@@ -101,9 +101,10 @@ export function Dashboard() {
             </div>
             <div className="border border-border">
               {RECENT_DOCS.map((doc, i) => (
-                <div
+                <Link
                   key={doc.name}
-                  className={`group flex items-center justify-between px-5 py-4 hover:bg-muted/40 transition-colors cursor-pointer ${
+                  to={`/workspace/${encodeURIComponent(doc.name.replace(/\.[^.]+$/, "").replace(/\s+/g, "-").toLowerCase())}`}
+                  className={`group flex items-center justify-between px-5 py-4 hover:bg-muted/40 transition-colors ${
                     i !== RECENT_DOCS.length - 1 ? "border-b border-border" : ""
                   }`}
                 >
@@ -124,7 +125,7 @@ export function Dashboard() {
                       <MoreHorizontal className="size-4" strokeWidth={1.5} />
                     </button>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </FadeIn>
