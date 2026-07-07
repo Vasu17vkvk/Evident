@@ -1,10 +1,11 @@
 export enum DocumentStatus {
-  UPLOADING = "Uploading",
-  EXTRACTING_CONTENT = "Extracting Content",
-  EXTRACTING_METADATA = "Extracting Metadata",
-  GENERATING_INSIGHTS = "Generating Insights",
-  READY = "Ready",
-  ERROR = "Error",
+  Idle = "Idle",
+  Uploading = "Uploading",
+  Parsing = "Parsing",
+  ExtractingMetadata = "Extracting Metadata",
+  GeneratingStatistics = "Generating Statistics",
+  Ready = "Ready",
+  Error = "Error",
 }
 
 export interface FactInsight {
@@ -53,41 +54,80 @@ export interface DocumentInsights {
   statistics: StatItem[];
 }
 
+// New Metadata interface
 export interface DocumentMetadata {
   title?: string;
   author?: string;
-  subject?: string;
-  keywords?: string[];
-  creator?: string;
-  producer?: string;
-  creationDate?: Date;
-  modificationDate?: Date;
-  [key: string]: unknown;
+  language?: string;
+  pageCount?: number;
+  wordCount?: number;
+  characterCount?: number;
+  estimatedReadingTime?: number;
+  documentType?: string;
+  documentCategory?: string;
+  fileType?: string;
+  fileSize?: number;
 }
 
+// New Content interface
+export interface DocumentContent {
+  fullText?: string;
+  pages?: string[];
+  paragraphs?: string[];
+  sections?: string[];
+}
+
+// New Statistics interface
+export interface DocumentStatistics {
+  words?: number;
+  characters?: number;
+  paragraphs?: number;
+  sentences?: number;
+  tables?: number;
+  images?: number;
+  lists?: number;
+  headings?: number;
+  averageSentenceLength?: number;
+  readingTime?: number;
+}
+
+// New Processing interface
+export interface DocumentProcessing {
+  uploadProgress?: number;
+  parseProgress?: number;
+  metadataProgress?: number;
+  statisticsProgress?: number;
+  insightsProgress?: number;
+  overallProgress?: number;
+}
+
+// Complete Document interface
 export interface Document {
   id: string;
   name: string;
-  size: number;
+  originalFile?: File;
   type: string;
-  extension: string;
-  pages?: number;
-  wordCount?: number;
-  characterCount?: number;
-  estimatedReadingTime?: number; // in minutes
-  language?: string;
-  createdAt: Date;
-  uploadedAt: Date;
+  size: number;
   status: DocumentStatus;
+  metadata?: DocumentMetadata;
+  content?: DocumentContent;
+  pages?: number;
+  statistics?: DocumentStatistics;
+  insights?: DocumentInsights;
+  searchIndex?: any;
+  processing?: DocumentProcessing;
+  createdAt: Date;
+  updatedAt: Date;
+  // Keep existing fields for backwards compatibility
+  extension?: string;
+  uploadedAt?: Date;
   thumbnail?: string;
   text?: string;
-  metadata?: DocumentMetadata;
   url?: string; // object URL for preview
-  insights?: DocumentInsights;
   pagesContent?: string[];
 }
 
-export type CreateDocumentInput = Omit<
+export type CreateDocumentInput = Partial<Omit<
   Document,
-  "id" | "createdAt" | "uploadedAt" | "status"
->;
+  "id" | "createdAt" | "updatedAt" | "status"
+>>;

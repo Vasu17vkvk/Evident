@@ -117,7 +117,7 @@ export function Nav() {
           <img
             src={logo}
             alt="Evident"
-            className="h-15 w-auto"
+            className={`h-10 w-auto ${!isDark ? 'invert hue-rotate-180' : ''}`}
           />
           <span className="text-xl font-semibold tracking-tight text-foreground">
             Evident
@@ -179,9 +179,10 @@ export function Nav() {
                 </Link>
                 <Link
                   to="/signin"
-                  className={cn(buttonVariants({ variant: "default", size: "sm" }))}
+                  className="group relative text-xs uppercase tracking-wider text-accent font-semibold transition-colors duration-190 hover:text-accent/80"
                 >
                   Get started
+                  <span className="absolute -bottom-2.5 left-0 h-0.5 w-full bg-accent" />
                 </Link>
               </>
             )}
@@ -264,7 +265,7 @@ export function Nav() {
                   </Link>
                   <Link
                     to="/signin"
-                    className={cn(buttonVariants({ variant: "default" }), "w-full justify-center")}
+                    className="group relative text-xs uppercase tracking-wider text-accent font-semibold transition-colors duration-150 hover:text-accent/80 w-full justify-center flex items-center py-3"
                   >
                     Get started
                   </Link>

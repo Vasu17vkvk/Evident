@@ -7,7 +7,7 @@ import {
   Copy,
   Loader2,
 } from "lucide-react";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 
 const SUGGESTED_PROMPTS = [
   "Summarise the document's main point",

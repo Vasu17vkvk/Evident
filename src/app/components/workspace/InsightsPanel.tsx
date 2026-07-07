@@ -26,7 +26,7 @@ import {
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../ui/chart";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 import { DocumentInsights } from "../../types/document";
 
 interface Props {
@@ -44,100 +44,10 @@ const TABS = [
 
 type TabName = typeof TABS[number];
 
-// ------------------------------
-// Mock Data for all tabs
-// ------------------------------
 
-const SUMMARY_MOCK_DATA = {
-  executiveSummary:
-    "Evident AI Document Copilot processes arbitrary PDF/TXT/DOCX files dynamically. It splits them into secure vector partitions, indexes semantic tokens, and executes natural language answers referencing exact page number citations to prevent generative hallucinations.",
-  documentPurpose:
-    "Provide enterprise research teams with a highly auditable, interactive dashboard that binds source documents directly with generative Q&A summaries and extracted timeline facts.",
-  keyTopics: ["Document Interrogation", "Retrieval-Augmented Generation", "Secure Sandboxing", "Inline Citations"],
-  readingTime: "5 min",
-  tone: "Objective & Professional",
-};
-
-const FACTS_MOCK_DATA = [
-  {
-    id: "f1",
-    label: "Active Enterprise Nodes",
-    value: "12,000+",
-    change: "+15% MoM expansion",
-    icon: "Users",
-  },
-  {
-    id: "f2",
-    label: "Average Query Latency",
-    value: "< 2.0s",
-    change: "99.9% availability",
-    icon: "Zap",
-  },
-  {
-    id: "f3",
-    label: "Quarter-on-Quarter Growth",
-    value: "34%",
-    change: "Q4 financial performance",
-    icon: "TrendingUp",
-  },
-];
-
-const ENTITIES_MOCK_DATA = {
-  people: [
-    { name: "Chief Executive Officer", role: "Executive Leader", mentions: 4 },
-  ],
-  organizations: [
-    { name: "Evident AI Inc.", type: "Technology Enterprise", mentions: 8 },
-    { name: "Sequoia Capital", type: "Venture Equity Group", mentions: 2 },
-  ],
-  locations: [
-    { name: "Delaware", type: "Incorporation Registry", mentions: 1 },
-    { name: "San Francisco", type: "Arbitration Forum", mentions: 1 },
-  ],
-};
-
-const TIMELINE_MOCK_DATA = [
-  {
-    date: "Oct 1, 2024",
-    title: "Q4 Launch",
-    description: "Official launch of Document Copilot v2.0 with multi-document analysis",
-    page: 3,
-  },
-  {
-    date: "Oct 15, 2024",
-    title: "Sequoia Investment",
-    description: "Series B funding round of $45M led by Sequoia Capital",
-    page: 7,
-  },
-  {
-    date: "Nov 5, 2024",
-    title: "Enterprise Deal",
-    description: "Signed partnership with Fortune 100 financial services firm",
-    page: 12,
-  },
-  {
-    date: "Dec 10, 2024",
-    title: "Product Update",
-    description: "Released timeline insights feature for legal documents",
-    page: 15,
-  },
-  {
-    date: "Dec 31, 2024",
-    title: "Quarter End",
-    description: "Closed Q4 2024 financial results reported",
-    page: 20,
-  },
-];
-
-const STATISTICS_MOCK_DATA = [
-  { name: "Q1", revenue: 7.2, growth: 12 },
-  { name: "Q2", revenue: 8.5, growth: 15 },
-  { name: "Q3", revenue: 9.8, growth: 18 },
-  { name: "Q4", revenue: 12.4, growth: 34 },
-];
 
 const CHART_CONFIG = {
-  revenue: { label: "Revenue (M)", color: "#ff3d00" },
+  value: { label: "Count", color: "#ff3d00" },
 } satisfies any;
 
 // ------------------------------
@@ -253,15 +163,15 @@ export function InsightsPanel({
   const { document } = useDocument();
 
   const insights = document?.insights || {
-    executiveSummary: SUMMARY_MOCK_DATA.executiveSummary,
-    documentPurpose: SUMMARY_MOCK_DATA.documentPurpose,
-    keyTopics: SUMMARY_MOCK_DATA.keyTopics,
-    readingTime: SUMMARY_MOCK_DATA.readingTime,
-    tone: SUMMARY_MOCK_DATA.tone,
-    facts: FACTS_MOCK_DATA,
-    entities: ENTITIES_MOCK_DATA,
-    timeline: TIMELINE_MOCK_DATA,
-    statistics: STATISTICS_MOCK_DATA,
+    executiveSummary: "",
+    documentPurpose: "",
+    keyTopics: [],
+    readingTime: "0 min",
+    tone: "",
+    facts: [],
+    entities: { people: [], organizations: [], locations: [] },
+    timeline: [],
+    statistics: [],
   };
 
   // Save scroll position when active tab changes
@@ -401,18 +311,50 @@ export function InsightsPanel({
                   {/* Reading Stats */}
                   <SummarySection title="Document Stats" icon={Sparkles}>
                     <Card className="p-4 bg-card border border-border rounded-sm gap-3">
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-4 gap-3">
                         <SummaryStat
                           label="Reading Time"
-                          value={document?.estimatedReadingTime ? `${document.estimatedReadingTime} min` : (typeof insights.readingTime === 'string' ? insights.readingTime : '12 min')}
+                          value={document?.statistics?.readingTime ? `${document.statistics.readingTime} min` : (typeof insights.readingTime === 'string' ? insights.readingTime : '12 min')}
                         />
                         <SummaryStat
                           label="Word Count"
-                          value={document?.wordCount ? document.wordCount.toLocaleString() : "2,500"}
+                          value={document?.statistics?.words ? document.statistics.words.toLocaleString() : (document?.wordCount ? document.wordCount.toLocaleString() : "2,500")}
+                        />
+                        <SummaryStat
+                          label="Characters"
+                          value={document?.statistics?.characters ? document.statistics.characters.toLocaleString() : "0"}
                         />
                         <SummaryStat
                           label="Pages"
                           value={document?.pages ? document.pages.toString() : "20"}
+                        />
+                        <SummaryStat
+                          label="Paragraphs"
+                          value={document?.statistics?.paragraphs ? document.statistics.paragraphs.toString() : "0"}
+                        />
+                        <SummaryStat
+                          label="Sentences"
+                          value={document?.statistics?.sentences ? document.statistics.sentences.toString() : "0"}
+                        />
+                        <SummaryStat
+                          label="Avg Sentence"
+                          value={document?.statistics?.averageSentenceLength ? `${document.statistics.averageSentenceLength} words` : "0 words"}
+                        />
+                        <SummaryStat
+                          label="Headings"
+                          value={document?.statistics?.headings ? document.statistics.headings.toString() : "0"}
+                        />
+                        <SummaryStat
+                          label="Lists"
+                          value={document?.statistics?.lists ? document.statistics.lists.toString() : "0"}
+                        />
+                        <SummaryStat
+                          label="Tables"
+                          value={document?.statistics?.tables ? document.statistics.tables.toString() : "0"}
+                        />
+                        <SummaryStat
+                          label="Images"
+                          value={document?.statistics?.images ? document.statistics.images.toString() : "0"}
                         />
                       </div>
                     </Card>
@@ -457,7 +399,7 @@ export function InsightsPanel({
                             <YAxis stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
                             <ChartTooltip content={<ChartTooltipContent />} />
                             <Bar 
-                              dataKey={Object.keys(insights.statistics[0] || {}).find(k => k !== "name" && k !== "growth") || "revenue"} 
+                              dataKey="value" 
                               fill="#ff3d00" 
                               radius={[4, 4, 0, 0]} 
                             />

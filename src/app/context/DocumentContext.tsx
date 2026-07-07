@@ -1,6 +1,5 @@
 import {
   createContext,
-  useContext,
   useState,
   useCallback,
   useEffect,
@@ -10,8 +9,12 @@ import {
   Document,
   DocumentStatus,
   DocumentInsights,
+  DocumentContent,
 } from "../types/document";
 import { DocumentService } from "../services/document/documentService";
+import { ParserService } from "../services/document/parserService";
+import { MetadataService } from "../services/document/metadataService";
+import { StatisticsService } from "../services/document/statisticsService";
 
 interface DocumentContextType {
   /** The currently active document, or null */
@@ -26,7 +29,7 @@ interface DocumentContextType {
   updateDocument: (updates: Partial<Document>) => void;
 }
 
-const DocumentContext = createContext<DocumentContextType | null>(null);
+export const DocumentContext = createContext<DocumentContextType | null>(null);
 
 /* ── IndexedDB Session Persistence Helpers ──────────────── */
 function openDB(): Promise<IDBDatabase> {
@@ -93,60 +96,27 @@ async function deleteDocumentFromDB(id: string) {
   }
 }
 
-/* ── Document Parsing Helpers (Extracting Real Content) ───── */
-function getExtension(name: string): string {
-  const parts = name.split(".");
-  return parts.length > 1 ? parts.pop()!.toLowerCase() : "";
-}
-
-async function extractPDFText(file: File): Promise<string[]> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdfjsLib = await import("pdfjs-dist");
-    
-    // Set local worker location
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
-    
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-    const pages: string[] = [];
-    
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(" ");
-      pages.push(pageText.trim() || `[Page ${i} contains no extractable text]`);
-    }
-    return pages;
-  } catch (err) {
-    console.error("PDF text extraction failed:", err);
-    return [];
-  }
-}
-
-function readTxtFile(file: File): Promise<string[]> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = reader.result as string;
-      const pages: string[] = [];
-      let start = 0;
-      // Chunk text into pages of ~1200 characters each
-      while (start < text.length) {
-        pages.push(text.substring(start, start + 1200));
-        start += 1200;
-      }
-      resolve(pages.length > 0 ? pages : ["Document has no readable text content."]);
-    };
-    reader.onerror = () => resolve(["Failed to read plain text file contents."]);
-    reader.readAsText(file);
-  });
-}
-
 /* ── Dynamic Insights Generator ─────────────────────────── */
-function generateRealInsights(fileName: string, pagesContent: string[]): DocumentInsights {
+function generateRealInsights(
+  fileName: string, 
+  pagesContent: string[], 
+  metadata?: { 
+    pageCount?: number; 
+    wordCount?: number; 
+    characterCount?: number; 
+    estimatedReadingTime?: number; 
+    documentCategory?: string;
+    fileSize?: number;
+    fileType?: string;
+    title?: string;
+  },
+  docStats?: {
+    words?: number;
+    characters?: number;
+    paragraphs?: number;
+    sentences?: number;
+  }
+): DocumentInsights {
   const fullText = pagesContent.join("\n");
   const sentences = fullText.split(/[.!?]\s+/).filter(Boolean);
   
@@ -197,30 +167,51 @@ function generateRealInsights(fileName: string, pagesContent: string[]): Documen
     sortedTopics.push("Analysis", "Structure", "Critique");
   }
 
-  // 4. Key Facts (extracted from sentences containing numbers/years)
+  // 4. Key Facts (use real metadata)
   const facts: DocumentInsights["facts"] = [];
-  let factId = 1;
-  const numberSentences = sentences.filter(s => /\b(1[789]\d{2}|20\d{2}|\d+%\s+|\d+,\d+|\$\d+)\b/.test(s));
-  for (const fs of numberSentences.slice(0, 3)) {
-    const numMatch = fs.match(/\b(1[789]\d{2}|20\d{2}|\d+%\s+|\d+,\d+|\$\d+|\d+\s+percent)\b/);
-    if (numMatch) {
-      const val = numMatch[0];
-      let label = fs.replace(val, "").replace(/[\[\]]/g, "").trim();
-      if (label.length > 35) label = label.substring(0, 35) + "...";
-      facts.push({
-        id: factId++,
-        label: label.charAt(0).toUpperCase() + label.slice(1),
-        value: val,
-        icon: "Zap",
-        change: fs.trim().substring(0, 45) + "..."
-      });
-    }
-  }
-  if (facts.length === 0) {
-    facts.push({ id: 1, label: "Document Page Length", value: `${pagesContent.length} Pages`, icon: "FileText", change: "Full index processed" });
-    facts.push({ id: 2, label: "Total Word Count", value: `${words.length} Words`, icon: "Check", change: "Tokenized successfully" });
-    facts.push({ id: 3, label: "Estimated Reading", value: `${Math.max(1, Math.ceil(words.length / 200))} min`, icon: "Zap", change: "Avg 200 words/min" });
-  }
+  
+  // Format file size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  facts.push({ 
+    id: 1, 
+    label: "Page Count", 
+    value: `${metadata?.pageCount || pagesContent.length} Pages`, 
+    icon: "FileText", 
+    change: "Document length" 
+  });
+  facts.push({ 
+    id: 2, 
+    label: "Word Count", 
+    value: `${(metadata?.wordCount || words.length).toLocaleString()} Words`, 
+    icon: "Check", 
+    change: "Tokenized successfully" 
+  });
+  facts.push({ 
+    id: 3, 
+    label: "Estimated Reading", 
+    value: `${metadata?.estimatedReadingTime || Math.max(1, Math.ceil(words.length / 200))} min`, 
+    icon: "Zap", 
+    change: "Avg 200 words/min" 
+  });
+  facts.push({ 
+    id: 4, 
+    label: "File Size", 
+    value: metadata?.fileSize ? formatFileSize(metadata.fileSize) : "Unknown", 
+    icon: "FileText", 
+    change: "File metadata" 
+  });
+  facts.push({ 
+    id: 5, 
+    label: "Document Category", 
+    value: metadata?.documentCategory || "General", 
+    icon: "Sparkles", 
+    change: "Auto-classified" 
+  });
 
   // 5. Entities (capitalized word sequences)
   const peopleSet = new Set<string>();
@@ -272,12 +263,16 @@ function generateRealInsights(fileName: string, pagesContent: string[]): Documen
     timeline.push({ date: "1757", title: "Publication of Standard of Taste", description: "David Hume publishes his landmark aesthetic essay addressing the paradox of sentiment and critical judgment.", page: 1 });
   }
 
-  // 7. Statistics (visual graph)
+  // 7. Statistics (visual graph - use real document statistics)
   const statistics = [
-    { name: sortedTopics[0] || "Aesthetics", revenue: 85, growth: 10 },
-    { name: sortedTopics[1] || "Taste", revenue: 70, growth: 12 },
-    { name: sortedTopics[2] || "Sentiment", revenue: 65, growth: 15 },
-    { name: sortedTopics[3] || "Judgment", revenue: 50, growth: 18 },
+    { name: "Words", value: docStats?.words || metadata?.wordCount || words.length },
+    { name: "Characters", value: docStats?.characters || metadata?.characterCount || fullText.length },
+    { name: "Paragraphs", value: docStats?.paragraphs || 0 },
+    { name: "Sentences", value: docStats?.sentences || sentences.length },
+    { name: "Headings", value: docStats?.headings || 0 },
+    { name: "Lists", value: docStats?.lists || 0 },
+    { name: "Tables", value: docStats?.tables || 0 },
+    { name: "Images", value: docStats?.images || 0 },
   ];
 
   return {
@@ -286,6 +281,7 @@ function generateRealInsights(fileName: string, pagesContent: string[]): Documen
     keyTopics: sortedTopics,
     readingDifficulty: pagesContent.length > 10 ? "Advanced" : "Intermediate",
     tone: "Analytical / Expositional",
+    readingTime: `${metadata?.estimatedReadingTime || Math.max(1, Math.ceil(words.length / 200))} min`,
     facts,
     entities: { people, organizations, locations },
     timeline,
@@ -293,29 +289,7 @@ function generateRealInsights(fileName: string, pagesContent: string[]): Documen
   };
 }
 
-const FINANCIAL_PAGES = [
-  "Evident AI Document Copilot - Platform Overview and Ingestion Pipeline\nThis document details the architecture and workflows of Evident AI's semantic document interrogation system. The platform allows users to upload documents (PDF, DOCX, TXT) and ask natural language queries, retrieving answers grounded in cited text passages to eliminate hallucinations.",
-  "Section 1: The Retrieval-Augmented Generation (RAG) Architecture\nRather than passing entire documents directly into context windows, Evident AI operates on RAG principles. Text content is extracted, segmented into recursive semantic blocks, and indexed as high-dimensional vector embeddings. When a query is made, the vector index surfaces only the top-K relevant chunks, which are injected into the LLM prompt.",
-  "Section 2: Interactive Interrogation and Verification\nEvery answer generated includes inline bracket citations (e.g., [p.1, p.3]). These citations correspond to the source chunks in the database. Users can click any citation to instantly highlight the originating text segment in the side-by-side document viewer, establishing auditability.",
-  "Section 3: Financial Scaling and Projections\nEvident AI has demonstrated 34% quarter-over-quarter growth in Q4 2024. Enterprise accounts have surpassed 12,000 active instances. Standard indexing latency remains under 8 seconds per file, with average query responses completing in less than 2 seconds.",
-  "Section 4: Privacy, Sandboxing, and Security Compliance\nUser documents are processed strictly in-memory during active sessions. No document data or parsed text blocks are retained in persistent storage after the session is closed. Transport security uses TLS 1.3, and vector nodes are protected with AES-256 server-side encryption keys."
-];
 
-const LEGAL_PAGES = [
-  "EMPLOYMENT AGREEMENT\nTHIS EMPLOYMENT AGREEMENT (the 'Agreement') is entered into by and between Evident AI Inc., a Delaware corporation (the 'Company'), and the Employee signing below. The effective date of employment shall commence on January 15, 2026 under the following conditions and provisions.",
-  "Section 1: Duties, Position, and Scope of Role\nThe Employee shall serve in a full-time capacity, reporting directly to the Chief Executive Officer or designate. Employee agrees to perform all duties faithfully, to promote the interests of the Company, and to comply with all established guidelines and policies.",
-  "Section 2: Base Salary, Bonuses, and Equity Option Grants\nThe Company shall pay Employee a base salary of $185,000 per annum, subject to standard withholdings. Furthermore, the Employee is eligible for a target performance bonus of up to $25,000. Under Section 4, the Company will grant 15,000 stock option units, vesting over 48 months with a 1-year cliff.",
-  "Section 3: Proprietary Information, Non-Disclosure, and IP Assignment\nEmployee agrees that all inventions, discoveries, designs, algorithms, and software code developed during employment belong exclusively to the Company. Employee shall not disclose confidential proprietary information during or after their tenure.",
-  "Section 4: Termination, Severance, and Dispute Resolution Venue\nEither party may terminate this agreement at-will with two weeks written notice. Covenants regarding intellectual property and non-disclosure survive termination. Any legal disputes arising under this agreement shall be submitted to binding arbitration in San Francisco, California."
-];
-
-const GENERAL_PAGES = [
-  "EVIDENT AI TECHNICAL SPECIFICATION DOCUMENT\nWelcome to the developer reference guide. This document outlines the protocols, requirements, and diagnostic procedures for the Evident document indexing and retrieval backend. It is intended for software engineers and operators.",
-  "Section 1: System Requirements and Dependency Mapping\nThe backend environment requires Node.js v20+, TypeScript v5+, and a connection to a vector store database. Average latency for embedding generation is under 150ms per paragraph chunk, with 99.95% API service SLA guarantees.",
-  "Section 2: API Endpoints and Authentication Codes\nAll REST API endpoints require a secret token passed in the Authorization header. Use `/v1/documents` for uploading file packages and initiating vector parsing pipelines. Keys must be rotated every 90 days on the Account Portal.",
-  "Section 3: Error Handling and Fallback Workflows\nWhen index creation fails due to structural PDF errors, the ingestion server flags the document with an Error state. Client applications should automatically fall back to text layer extraction, parsing UTF-8 bytes to construct readable layout pages.",
-  "Section 4: Secure Data Sandbox and Compliance Standards\nAll vector databases are partitioned using tenant isolation keys. Data in transit uses TLS 1.3 encryption. Documents processed under custom client agreements are processed entirely in-memory and deleted immediately upon session termination."
-];
 
 /* ── Provider ─────────────────────────────────── */
 export function DocumentProvider({ children }: { children: ReactNode }) {
@@ -357,94 +331,101 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   }, [document]);
 
   const uploadDocument = useCallback(async (file: File) => {
-    const extension = getExtension(file.name);
+    const extension = ParserService.getExtension(file.name);
+    
     // Revoke any previous object URL
     setDocumentState((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
       return null;
     });
 
-    // Create document via service (Upload Document starts)
-    const newDoc = await DocumentService.create({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      extension,
-      url: URL.createObjectURL(file),
-    });
-
-    setDocumentState(newDoc);
-    
-    // Persist original binary file and metadata
-    await saveDocumentToDB(newDoc.id, newDoc, file);
-    localStorage.setItem("activeDocumentId", newDoc.id);
-
-    // Extract content asynchronously in parallel
-    let parsedContent: string[] = [];
     try {
-      if (extension === "pdf") {
-        parsedContent = await extractPDFText(file);
-      } else if (extension === "txt") {
-        parsedContent = await readTxtFile(file);
-      }
-    } catch (e) {
-      console.error("File extraction pipeline failure:", e);
-    }
-
-    // 1. Transition to Extract Content (after 1000ms)
-    setTimeout(async () => {
-      const stage2 = await DocumentService.update(newDoc.id, {
-        status: DocumentStatus.EXTRACTING_CONTENT,
+      // Step 1: Create document (Uploading)
+      let currentDoc = await DocumentService.create({
+        name: file.name,
+        originalFile: file,
+        size: file.size,
+        type: file.type,
+        extension,
+        url: URL.createObjectURL(file),
+        status: DocumentStatus.Uploading,
+        processing: { uploadProgress: 100, overallProgress: 15 }
       });
-      setDocumentState(stage2 || null);
 
-      // 2. Transition to Extract Metadata (after another 1200ms)
-      setTimeout(async () => {
-        let pContent = parsedContent;
-        if (pContent.length === 0) {
-          const isFinancial = file.name.toLowerCase().includes("financial") || file.name.toLowerCase().includes("report") || file.name.toLowerCase().includes("q4");
-          const isLegal = file.name.toLowerCase().includes("legal") || file.name.toLowerCase().includes("contract") || file.name.toLowerCase().includes("agreement") || file.name.toLowerCase().includes("employment");
-          
-          pContent = GENERAL_PAGES;
-          if (isFinancial) pContent = FINANCIAL_PAGES;
-          else if (isLegal) pContent = LEGAL_PAGES;
-        }
+      setDocumentState(currentDoc);
+      await saveDocumentToDB(currentDoc.id, currentDoc, file);
+      localStorage.setItem("activeDocumentId", currentDoc.id);
 
-        const calculatedWords = pContent.reduce((acc, p) => acc + p.split(/\s+/).filter(Boolean).length, 0);
-        const calculatedChars = pContent.reduce((acc, p) => acc + p.length, 0);
-        const readingTime = Math.max(1, Math.ceil(calculatedWords / 200));
+      // Step 2: Parse Document
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        status: DocumentStatus.Parsing,
+        processing: { ...currentDoc.processing, parseProgress: 50, overallProgress: 35 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
 
-        const stage3 = await DocumentService.update(newDoc.id, {
-          status: DocumentStatus.EXTRACTING_METADATA,
-          pages: pContent.length,
-          wordCount: calculatedWords,
-          characterCount: calculatedChars,
-          estimatedReadingTime: readingTime,
-          language: "English",
-          pagesContent: pContent,
-        });
-        setDocumentState(stage3 || null);
+      const content = await ParserService.parseFile(file);
+      
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        content,
+        pages: content.pages.length,
+        pagesContent: content.pages,
+        processing: { ...currentDoc.processing, parseProgress: 100, overallProgress: 45 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
 
-        // 3. Transition to Generate Insights (after another 1200ms)
-        setTimeout(async () => {
-          const mockInsights = generateRealInsights(file.name, pContent);
-          const stage4 = await DocumentService.update(newDoc.id, {
-            status: DocumentStatus.GENERATING_INSIGHTS,
-            insights: mockInsights,
-          });
-          setDocumentState(stage4 || null);
+      // Step 3: Extract Metadata
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        status: DocumentStatus.ExtractingMetadata,
+        processing: { ...currentDoc.processing, metadataProgress: 50, overallProgress: 55 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
 
-          // 4. Transition to Display in Workspace (after another 1500ms)
-          setTimeout(async () => {
-            const final = await DocumentService.update(newDoc.id, {
-              status: DocumentStatus.READY,
-            });
-            setDocumentState(final || null);
-          }, 1500);
-        }, 1200);
-      }, 1200);
-    }, 1000);
-  }, []);
+      const metadata = MetadataService.extractMetadata(file.name, file.size, file.type, content);
+      
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        metadata,
+        wordCount: metadata.wordCount,
+        characterCount: metadata.characterCount,
+        estimatedReadingTime: metadata.estimatedReadingTime,
+        language: metadata.language,
+        processing: { ...currentDoc.processing, metadataProgress: 100, overallProgress: 65 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
+
+      // Step 4: Generate Statistics and Insights
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        status: DocumentStatus.GeneratingStatistics,
+        processing: { ...currentDoc.processing, statisticsProgress: 50, overallProgress: 85 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
+
+      const statistics = StatisticsService.calculateStatistics(content);
+      const insights = generateRealInsights(file.name, content.pages, metadata, statistics);
+      
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        statistics,
+        insights,
+        processing: { ...currentDoc.processing, statisticsProgress: 100, insightsProgress: 100, overallProgress: 95 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
+
+      // Step 5: Ready!
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        status: DocumentStatus.Ready,
+        processing: { ...currentDoc.processing, overallProgress: 100 }
+      }) || currentDoc;
+      setDocumentState(currentDoc);
+
+    } catch (error) {
+      console.error("Document processing failed:", error);
+      // Handle error state
+      const docId = document?.id;
+      if (docId) {
+        const errorDoc = await DocumentService.update(docId, { status: DocumentStatus.Error });
+        setDocumentState(errorDoc || null);
+      }
+    }
+  }, [document]);
 
   const updateDocument = useCallback(
     async (updates: Partial<Document>) => {
@@ -479,11 +460,4 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       {children}
     </DocumentContext.Provider>
   );
-}
-
-/* ── Hook ────────────────────────────────────── */
-export function useDocument() {
-  const ctx = useContext(DocumentContext);
-  if (!ctx) throw new Error("useDocument must be used inside <DocumentProvider>");
-  return ctx;
 }

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { Loader2 } from "lucide-react";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 
-// Configure pdfjs worker path to point to our local MIME-resolved asset
-pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+// Configure pdfjs worker path to use CDN
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 interface Props {
   /** URL of the PDF file (should be an object URL) */

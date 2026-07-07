@@ -1,0 +1,134 @@
+import { DocumentContent } from "../../types/document";
+import mammoth from "mammoth";
+
+export class ParserService {
+  static getExtension(name: string): string {
+    const parts = name.split(".");
+    return parts.length > 1 ? parts.pop()!.toLowerCase() : "";
+  }
+
+  static async extractPDFText(file: File): Promise<string[]> {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfjsLib = await import("pdfjs-dist");
+      
+      // Set worker - use CDN as fallback or let pdfjs handle it
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      const pages: string[] = [];
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str)
+          .join(" ");
+        pages.push(pageText.trim() || `[Page ${i} contains no extractable text]`);
+      }
+      return pages;
+    } catch (err) {
+      console.error("PDF text extraction failed:", err);
+      return [];
+    }
+  }
+
+  static async extractDOCXText(file: File): Promise<{ htmlPages: string[]; plainText: string }> {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Get both HTML (for display) and raw text (for processing)
+      const [htmlResult, rawTextResult] = await Promise.all([
+        mammoth.convertToHtml({ arrayBuffer }),
+        mammoth.extractRawText({ arrayBuffer })
+      ]);
+      
+      const html = htmlResult.value;
+      const plainText = rawTextResult.value;
+      
+      // Split HTML into "pages" (simulate by chunks, since DOCX doesn't have native pages)
+      const htmlPages: string[] = [];
+      // Split on paragraphs or headings to make better page breaks
+      const chunks = html.split(/(?=<p>|<h[1-6]>)/i);
+      let currentPage = "";
+      const maxCharsPerPage = 2000;
+
+      for (const chunk of chunks) {
+        if (currentPage.length + chunk.length > maxCharsPerPage && currentPage) {
+          htmlPages.push(currentPage);
+          currentPage = chunk;
+        } else {
+          currentPage += chunk;
+        }
+      }
+
+      if (currentPage) {
+        htmlPages.push(currentPage);
+      }
+
+      return {
+        htmlPages: htmlPages.length > 0 ? htmlPages : ["Document has no readable text content."],
+        plainText
+      };
+    } catch (err) {
+      console.error("DOCX text extraction failed:", err);
+      return { htmlPages: ["Document has no readable text content."], plainText: "" };
+    }
+  }
+
+  static async readTxtFile(file: File): Promise<string[]> {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        const pages: string[] = [];
+        let start = 0;
+        // Chunk text into pages of ~1200 characters each
+        while (start < text.length) {
+          pages.push(text.substring(start, start + 1200));
+          start += 1200;
+        }
+        resolve(pages.length > 0 ? pages : ["Document has no readable text content."]);
+      };
+      reader.onerror = () => resolve(["Failed to read plain text file contents."]);
+      reader.readAsText(file);
+    });
+  }
+
+  static async parseFile(file: File): Promise<DocumentContent> {
+    const extension = this.getExtension(file.name);
+    let pages: string[] = [];
+    let fullText = "";
+
+    try {
+      if (extension === "pdf") {
+        pages = await this.extractPDFText(file);
+        fullText = pages.join("\n");
+      } else if (extension === "docx") {
+        const docxResult = await this.extractDOCXText(file);
+        pages = docxResult.htmlPages;
+        fullText = docxResult.plainText;
+      } else if (extension === "txt") {
+        pages = await this.readTxtFile(file);
+        fullText = pages.join("\n");
+      }
+    } catch (e) {
+      console.error("File extraction pipeline failure:", e);
+    }
+
+    const paragraphs = fullText.split(/\n\s*\n/).filter(Boolean);
+    // Extract headings (simple heuristic: lines starting with #, or all caps)
+    const sections = paragraphs.filter(p => 
+      p.startsWith("#") || 
+      (p === p.toUpperCase() && p.length > 0 && p.length < 100)
+    );
+
+    return {
+      pages,
+      fullText,
+      paragraphs,
+      sections
+    };
+  }
+}

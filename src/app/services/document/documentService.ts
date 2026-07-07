@@ -26,8 +26,17 @@ export class DocumentService {
       ...input,
       id,
       createdAt: now,
+      updatedAt: now,
       uploadedAt: now,
-      status: DocumentStatus.UPLOADING,
+      status: DocumentStatus.Uploading,
+      processing: {
+        uploadProgress: 0,
+        parseProgress: 0,
+        metadataProgress: 0,
+        statisticsProgress: 0,
+        insightsProgress: 0,
+        overallProgress: 0
+      }
     };
     documents.set(id, document);
     return document;
@@ -40,8 +49,16 @@ export class DocumentService {
   ): Promise<Document | undefined> {
     const existing = documents.get(id);
     if (!existing) return undefined;
-    const updated = { ...existing, ...updates };
+    const updated = { 
+      ...existing, 
+      ...updates, 
+      updatedAt: new Date()
+    };
     documents.set(id, updated);
     return updated;
+  }
+
+  static get(id: string): Document | undefined {
+    return documents.get(id);
   }
 }

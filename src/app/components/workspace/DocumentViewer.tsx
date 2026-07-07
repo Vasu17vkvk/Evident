@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import {
   ZoomIn,
   ZoomOut,
@@ -15,12 +15,45 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useNavigate } from "react-router";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 import { PDFViewer } from "./PDFViewer";
 import { DocumentStatus } from "../../types/document";
 import { ProcessingPipeline } from "./ProcessingPipeline";
 
-function HighlightText({ text, search }: { text: string; search: string }) {
+// Function to safely highlight text in HTML
+function highlightHtml(html: string, search: string) {
+  if (!search || !search.trim()) return html;
+  
+  // Escape special regex characters
+  const escapedSearch = search.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+  const regex = new RegExp(`(${escapedSearch})`, "gi");
+  
+  // Split HTML into parts, but avoid highlighting inside tags
+  // This is a simple approach; for production, use a proper HTML parser
+  const parts = html.split(/(<[^>]+>)/g);
+  
+  return parts.map((part, i) => {
+    if (part.startsWith("<") && part.endsWith(">")) {
+      // It's a tag, don't modify
+      return part;
+    } else {
+      // It's text content, apply highlighting
+      return part.replace(regex, '<mark class="bg-[#ff3d00]/30 text-[#ff3d00] font-medium border-b border-[#ff3d00]/60 px-0.5 rounded-sm">$1</mark>');
+    }
+  }).join("");
+}
+
+function HighlightText({ text, search, isHtml }: { text: string; search: string; isHtml?: boolean }) {
+  if (isHtml) {
+    const highlightedHtml = highlightHtml(text, search);
+    return (
+      <div 
+        className="text-[12px] leading-relaxed text-foreground select-text [&_p]:mb-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:mb-1 [&_strong]:font-bold [&_em]:italic [&_b]:font-bold [&_i]:italic [&_br]:mb-2"
+        dangerouslySetInnerHTML={{ __html: highlightedHtml }} 
+      />
+    );
+  }
+  
   if (!search || !search.trim()) return <p className="text-[12px] leading-relaxed text-foreground whitespace-pre-wrap select-text">{text}</p>;
   const regex = new RegExp(`(${search.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
   const parts = text.split(regex);
@@ -39,13 +72,7 @@ function HighlightText({ text, search }: { text: string; search: string }) {
   );
 }
 
-const DEFAULT_PAGES_TEXT = [
-  "Evident AI Document Copilot - Platform Overview and Ingestion Pipeline\nThis document details the architecture and workflows of Evident AI's semantic document interrogation system. The platform allows users to upload documents (PDF, DOCX, TXT) and ask natural language queries, retrieving answers grounded in cited text passages to eliminate hallucinations.",
-  "Section 1: The Retrieval-Augmented Generation (RAG) Architecture\nRather than passing entire documents directly into context windows, Evident AI operates on RAG principles. Text content is extracted, segmented into recursive semantic blocks, and indexed as high-dimensional vector embeddings. When a query is made, the vector index surfaces only the top-K relevant chunks, which are injected into the LLM prompt.",
-  "Section 2: Interactive Interrogation and Verification\nEvery answer generated includes inline bracket citations (e.g., [p.1, p.3]). These citations correspond to the source chunks in the database. Users can click any citation to instantly highlight the originating text segment in the side-by-side document viewer, establishing auditability.",
-  "Section 3: Financial Scaling and Projections\nEvident AI has demonstrated 34% quarter-over-quarter growth in Q4 2024. Enterprise accounts have surpassed 12,000 active instances. Standard indexing latency remains under 8 seconds per file, with average query responses completing in less than 2 seconds.",
-  "Section 4: Privacy, Sandboxing, and Security Compliance\nUser documents are processed strictly in-memory during active sessions. No document data or parsed text blocks are retained in persistent storage after the session is closed. Transport security uses TLS 1.3, and vector nodes are protected with AES-256 server-side encryption keys."
-];
+
 
 interface Props {
   documentName?: string;
@@ -159,7 +186,7 @@ export function DocumentViewer({
   return (
     <div ref={containerRef} className="flex h-full flex-1 min-w-0 flex-col overflow-hidden bg-background">
       {hasDocument && document ? (
-        document.status !== DocumentStatus.READY ? (
+        document.status !== DocumentStatus.Ready ? (
           <ProcessingPipeline
             status={document.status}
             fileName={document.name}
@@ -322,10 +349,13 @@ export function DocumentViewer({
               onScroll={handleScroll}
               className="flex-1 overflow-y-auto bg-secondary px-4 py-8 md:px-10 md:py-12 flex flex-col items-center scroll-smooth"
             >
-              <div className="mx-auto w-full max-w-[680px] flex flex-col gap-8">
+              <div 
+                className="mx-auto w-full max-w-[680px] flex flex-col gap-8 transition-transform duration-200 ease-out origin-top"
+                style={{ transform: `scale(${scale})` }}
+              >
                 {Array.from({ length: document?.pages || 5 }).map((_, idx) => {
                   const pNum = idx + 1;
-                  const pText = document?.pagesContent?.[idx] || DEFAULT_PAGES_TEXT[idx % DEFAULT_PAGES_TEXT.length];
+                  const pText = document?.pagesContent?.[idx] || "";
                   
                   return (
                     <div 
@@ -351,6 +381,7 @@ export function DocumentViewer({
                         <HighlightText 
                           text={pText} 
                           search={searchQuery} 
+                          isHtml={document?.extension === "docx"}
                         />
                       </div>
 

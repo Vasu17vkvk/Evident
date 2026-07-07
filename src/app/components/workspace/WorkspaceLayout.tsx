@@ -5,7 +5,7 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { DocumentViewer } from "./DocumentViewer";
 import { AICopilotPanel } from "./AICopilotPanel";
 import { InsightsPanel } from "./InsightsPanel";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 
 type MobileTab = "document" | "copilot" | "insights" | "files";
 

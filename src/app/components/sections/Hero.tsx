@@ -23,7 +23,7 @@ import { Button } from "../ui/button";
 import { Container } from "../layout/Container";
 import { FadeIn } from "../layout/FadeIn";
 import { HERO_STEPS } from "../../data/content";
-import { useDocument } from "../../context/DocumentContext";
+import { useDocument } from "../../hooks/useDocument";
 
 /* ── Validation constants ─────────────────────── */
 const ALLOWED_EXTENSIONS = ["pdf", "docx", "txt"];

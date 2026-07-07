@@ -14,17 +14,17 @@
   --popover-foreground: #09090b;
   --primary: #ff3d00;
   --primary-foreground: #ffffff;
-  --secondary: #f4f4f5;
+  --secondary: #464545;
   --secondary-foreground: #09090b;
-  --muted: #f4f4f5;
-  --muted-foreground: #737373;
+  --muted: #464545;
+  --muted-foreground: #464545ff;
   --accent: #ff3d00;
   --accent-foreground: #ffffff;
   --destructive: #ff3d00;
   --destructive-foreground: #ffffff;
   --border: #e4e4e7;
   --border-hover: #cbd5e1;
-  --input: #f4f4f5;
+  --input: #797777;
   --input-background: #ffffff;
   --switch-background: #e4e4e7;
   --font-weight-medium: 500;
@@ -32,10 +32,10 @@
   --ring: #ff3d00;
   --radius: 0px;
   --chart-1: #ff3d00;
-  --chart-2: #737373;
+  --chart-2: #464545ff;
   --chart-3: #09090b;
   --chart-4: #e4e4e7;
-  --chart-5: #f4f4f5;
+  --chart-5: #464545;
   --sidebar: #ffffff;
   --sidebar-foreground: #09090b;
   --sidebar-primary: #ff3d00;
@@ -77,7 +77,7 @@
   --switch-background: #262626;
   --ring: #ff3d00;
   --sidebar: #0f0f0f;
-  --sidebar-foreground: #fafafa;
+  --sidebar-foreground: #464545ff;
   --sidebar-border: #262626;
 }
 
@@ -213,16 +213,16 @@
   }
 }
 
-/* Custom scrollbar styling to look clean and dark */
+/* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0a0a;
+  background: var(--background);
 }
 ::-webkit-scrollbar-thumb {
-  background: #262626;
+  background: var(--border);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {

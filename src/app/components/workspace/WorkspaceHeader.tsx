@@ -63,7 +63,7 @@ export function WorkspaceHeader({
             <img
               src={logo}
               alt="Evident logo"
-              className="h-8 w-auto max-w-[32px] object-contain"
+              className={`h-8 w-auto max-w-[32px] object-contain ${!isDark ? 'invert hue-rotate-180' : ''}`}
             />
             <span className="hidden text-sm font-semibold tracking-tight text-foreground xs:block sm:text-base">
               Evident
