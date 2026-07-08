@@ -34,8 +34,16 @@ export function WorkspaceLayout({
   const [mobileTab, setMobileTab] = useState<MobileTab>("document");
   const { document, hasDocument } = useDocument();
 
+  // Emergency fallback: if doc isn't Ready for too long, disable AI/Insights/Search.
+  const emergencyFallback = !!(document && document.status !== "Ready");
+
+  // Only allow searching once full processing completed.
+  const effectiveSearchQuery = emergencyFallback ? "" : searchQuery;
+
+
   // Use uploaded document name if available
   const displayDocumentName = hasDocument && document ? document.name : documentName;
+
 
   const mobileTabs: { id: MobileTab; label: string; icon: React.ElementType }[] = [
     { id: "document", label: "Document", icon: FileText },
@@ -46,30 +54,40 @@ export function WorkspaceLayout({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <WorkspaceHeader
-        documentName={displayDocumentName}
-        userName={userName}
-        userEmail={userEmail}
-        userInitials={userInitials}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        onSidebarToggle={() => setSidebarOpen((o) => !o)}
-        onCopilotToggle={() => {
-          // On mobile: switch to copilot tab
-          if (window.innerWidth < 1024) {
-            setMobileTab("copilot");
-          } else {
-            setCopilotOpen((o) => !o);
-          }
-        }}
-        onInsightsToggle={() => {
-          if (window.innerWidth < 1024) {
-            setMobileTab("insights");
-          } else {
-            setInsightsOpen((o) => !o);
-          }
-        }}
-      />
+        <WorkspaceHeader
+          documentName={displayDocumentName}
+          userName={userName}
+          userEmail={userEmail}
+          userInitials={userInitials}
+          searchQuery={searchQuery}
+          onSearchChange={(q) => {
+            if (emergencyFallback) return;
+            setSearchQuery(q);
+          }}
+          onSidebarToggle={() => setSidebarOpen((o) => !o)}
+          onCopilotToggle={() => {
+            if (emergencyFallback) {
+              // Prevent trapping user into AI UI during long processing.
+              return;
+            }
+            // On mobile: switch to copilot tab
+            if (window.innerWidth < 1024) {
+              setMobileTab("copilot");
+            } else {
+              setCopilotOpen((o) => !o);
+            }
+          }}
+          onInsightsToggle={() => {
+            if (emergencyFallback) {
+              return;
+            }
+            if (window.innerWidth < 1024) {
+              setMobileTab("insights");
+            } else {
+              setInsightsOpen((o) => !o);
+            }
+          }}
+        />
 
       {/* ── Desktop layout: side-by-side panels ── */}
       <div className="relative hidden lg:flex flex-1 overflow-hidden">
@@ -83,21 +101,22 @@ export function WorkspaceLayout({
           onPageChange={setCurrentPage}
           currentView={currentView}
           onViewChange={setCurrentView}
-          searchQuery={searchQuery}
+          searchQuery={effectiveSearchQuery}
           onInsightsToggle={() => setInsightsOpen((o) => !o)}
         />
         <div className="flex flex-col xl:flex-row xl:shrink-0 h-full">
           <AICopilotPanel
-            isOpen={copilotOpen}
+            isOpen={copilotOpen && !emergencyFallback}
             onClose={() => setCopilotOpen(false)}
             showMessages={showMessages}
             onCitationClick={(page) => {
+              if (emergencyFallback) return;
               setCurrentPage(page);
               setCurrentView("text");
             }}
           />
           <InsightsPanel
-            isOpen={insightsOpen}
+            isOpen={insightsOpen && !emergencyFallback}
             onClose={() => setInsightsOpen(false)}
           />
         </div>
@@ -123,7 +142,7 @@ export function WorkspaceLayout({
               onPageChange={setCurrentPage}
               currentView={currentView}
               onViewChange={setCurrentView}
-              searchQuery={searchQuery}
+              searchQuery={effectiveSearchQuery}
               onInsightsToggle={() => setMobileTab("insights")}
             />
           )}

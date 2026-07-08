@@ -3,6 +3,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import {
@@ -10,11 +11,25 @@ import {
   DocumentStatus,
   DocumentInsights,
   DocumentContent,
+  ProcessingError,
 } from "../types/document";
 import { DocumentService } from "../services/document/documentService";
 import { ParserService } from "../services/document/parserService";
 import { MetadataService } from "../services/document/metadataService";
 import { StatisticsService } from "../services/document/statisticsService";
+import { DocumentValidatorService } from "../services/document/documentValidatorService";
+import { pipelineDebugger } from "../services/debug/pipelineDebugger";
+
+// Timeout duration for processing states (15 seconds)
+const PROCESSING_TIMEOUT_MS = 15000;
+
+// Processing states that should have timeout protection
+const PROCESSING_STATES = [
+  DocumentStatus.Uploading,
+  DocumentStatus.Parsing,
+  DocumentStatus.ExtractingMetadata,
+  DocumentStatus.GeneratingStatistics,
+];
 
 interface DocumentContextType {
   /** The currently active document, or null */
@@ -27,79 +42,16 @@ interface DocumentContextType {
   hasDocument: boolean;
   /** Update the active document */
   updateDocument: (updates: Partial<Document>) => void;
+  /** Retry processing for a failed document */
+  retryProcessing: () => Promise<void>;
 }
 
 export const DocumentContext = createContext<DocumentContextType | null>(null);
 
-/* ── IndexedDB Session Persistence Helpers ──────────────── */
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined" || !window.indexedDB) {
-      reject(new Error("IndexedDB is not supported in this environment"));
-      return;
-    }
-    const request = indexedDB.open("EvidentWorkspaceDB", 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains("documents")) {
-        db.createObjectStore("documents", { keyPath: "id" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function saveDocumentToDB(id: string, metadata: any, file: File) {
-  try {
-    const db = await openDB();
-    const tx = db.transaction("documents", "readwrite");
-    const store = tx.objectStore("documents");
-    store.put({ id, metadata, file });
-    return new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("Failed to save to IndexedDB", err);
-  }
-}
-
-async function getDocumentFromDB(id: string): Promise<{ metadata: any; file: File } | null> {
-  try {
-    const db = await openDB();
-    const tx = db.transaction("documents", "readonly");
-    const store = tx.objectStore("documents");
-    const request = store.get(id);
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
-  } catch (err) {
-    console.error("Failed to read from IndexedDB", err);
-    return null;
-  }
-}
-
-async function deleteDocumentFromDB(id: string) {
-  try {
-    const db = await openDB();
-    const tx = db.transaction("documents", "readwrite");
-    const store = tx.objectStore("documents");
-    store.delete(id);
-    return new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("Failed to delete from IndexedDB", err);
-  }
-}
-
 /* ── Dynamic Insights Generator ─────────────────────────── */
 function generateRealInsights(
   fileName: string, 
-  pagesContent: string[], 
+  pagesContent: string[] = [], 
   metadata?: { 
     pageCount?: number; 
     wordCount?: number; 
@@ -110,12 +62,7 @@ function generateRealInsights(
     fileType?: string;
     title?: string;
   },
-  docStats?: {
-    words?: number;
-    characters?: number;
-    paragraphs?: number;
-    sentences?: number;
-  }
+  docStats?: any
 ): DocumentInsights {
   const fullText = pagesContent.join("\n");
   const sentences = fullText.split(/[.!?]\s+/).filter(Boolean);
@@ -289,49 +236,99 @@ function generateRealInsights(
   };
 }
 
-
-
 /* ── Provider ─────────────────────────────────── */
 export function DocumentProvider({ children }: { children: ReactNode }) {
   const [document, setDocumentState] = useState<Document | null>(null);
+  const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileToRetryRef = useRef<File | null>(null);
 
   // Restore active session on mount
   useEffect(() => {
     const activeId = localStorage.getItem("activeDocumentId");
     if (activeId) {
-      getDocumentFromDB(activeId).then((record) => {
-        if (record) {
-          const restoredDoc = {
-            ...record.metadata,
-            url: URL.createObjectURL(record.file),
-          };
-          DocumentService.restore(restoredDoc);
+      DocumentService.get(activeId).then((restoredDoc) => {
+        if (restoredDoc) {
           setDocumentState(restoredDoc);
         }
       });
     }
   }, []);
 
-  // Synchronize document metadata changes into IndexedDB automatically
+  // Monitor processing timeout
   useEffect(() => {
-    if (document) {
-      openDB().then((db) => {
-        const tx = db.transaction("documents", "readwrite");
-        const store = tx.objectStore("documents");
-        const request = store.get(document.id);
-        request.onsuccess = () => {
-          const record = request.result;
-          if (record) {
-            // Overwrite metadata, preserve the binary File object
-            store.put({ ...record, metadata: document });
-          }
-        };
-      });
+    if (!document || !PROCESSING_STATES.includes(document.status)) {
+      // Clear timeout if document is not in a processing state
+      if (timeoutIdRef.current) {
+        clearTimeout(timeoutIdRef.current);
+        timeoutIdRef.current = null;
+      }
+      return;
     }
-  }, [document]);
+
+    // Set timeout for this processing state
+    if (timeoutIdRef.current) {
+      clearTimeout(timeoutIdRef.current);
+    }
+
+    timeoutIdRef.current = setTimeout(async () => {
+      if (!document) return;
+
+      // Transition to Error status
+      const processingError: ProcessingError = {
+        message: `Document processing timed out after ${PROCESSING_TIMEOUT_MS / 1000} seconds while ${document.status.toLowerCase()}`,
+        code: "PROCESSING_TIMEOUT",
+        timestamp: Date.now(),
+        state: document.status,
+      };
+
+      const errorDoc = await DocumentService.update(document.id, {
+        status: DocumentStatus.Error,
+        processingError,
+        processing: { ...document.processing, timedOut: true },
+      });
+
+      setDocumentState(errorDoc || null);
+      console.error("Processing timeout:", processingError.message);
+      pipelineDebugger.error(
+        processingError.message,
+        "PROCESSING_TIMEOUT",
+        { fileName: document.name, timedOutState: document.status }
+      );
+    }, PROCESSING_TIMEOUT_MS);
+
+    return () => {
+      if (timeoutIdRef.current) {
+        clearTimeout(timeoutIdRef.current);
+        timeoutIdRef.current = null;
+      }
+    };
+  }, [document?.id, document?.status]);
+
+  const validateDocumentState = useCallback((doc: Document | null | undefined, strict = false) => {
+    const result = DocumentValidatorService.validateDocument(doc, { strict });
+
+    if (result.errors.length > 0) {
+      const errorSummary = result.errors.map((issue) => `${issue.field}: ${issue.message}`).join("; ");
+      console.error("Document validation failed:", errorSummary);
+      if (strict) {
+        throw new Error(errorSummary);
+      }
+    }
+
+    if (result.warnings.length > 0) {
+      const warningSummary = result.warnings.map((issue) => `${issue.field}: ${issue.message}`).join("; ");
+      console.warn("Document validation warnings:", warningSummary);
+    }
+
+    return result;
+  }, []);
 
   const uploadDocument = useCallback(async (file: File) => {
     const extension = ParserService.getExtension(file.name);
+    let currentDoc: Document | null | undefined = null;
+    
+    // Store file for potential retry
+    fileToRetryRef.current = file;
     
     // Revoke any previous object URL
     setDocumentState((prev) => {
@@ -341,46 +338,62 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
     try {
       // Step 1: Create document (Uploading)
-      let currentDoc = await DocumentService.create({
+      pipelineDebugger.uploadStarted(file.name, file.size);
+      
+      currentDoc = await DocumentService.create({
         name: file.name,
         originalFile: file,
         size: file.size,
         type: file.type,
         extension,
         url: URL.createObjectURL(file),
-        status: DocumentStatus.Uploading,
-        processing: { uploadProgress: 100, overallProgress: 15 }
+        processing: { uploadProgress: 100, overallProgress: 15, startedAt: Date.now() }
       });
 
+      // Set status to Uploading
+      currentDoc = await DocumentService.update(currentDoc.id, {
+        status: DocumentStatus.Uploading,
+      }) || currentDoc;
+
       setDocumentState(currentDoc);
-      await saveDocumentToDB(currentDoc.id, currentDoc, file);
       localStorage.setItem("activeDocumentId", currentDoc.id);
+      
+      pipelineDebugger.uploadCompleted(file.name);
 
       // Step 2: Parse Document
+      pipelineDebugger.parsingStarted(file.name, file.type);
+      
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.Parsing,
         processing: { ...currentDoc.processing, parseProgress: 50, overallProgress: 35 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       const content = await ParserService.parseFile(file);
+      pipelineDebugger.parsingCompleted(file.name, content.textPages?.length || 0);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
         content,
-        pages: content.pages.length,
-        pagesContent: content.pages,
+        pages: content.textPages?.length || 0,
+        pagesContent: content.textPages,
         processing: { ...currentDoc.processing, parseProgress: 100, overallProgress: 45 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       // Step 3: Extract Metadata
+      pipelineDebugger.metadataStarted(file.name);
+      
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.ExtractingMetadata,
         processing: { ...currentDoc.processing, metadataProgress: 50, overallProgress: 55 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       const metadata = MetadataService.extractMetadata(file.name, file.size, file.type, content);
+      pipelineDebugger.metadataCompleted(file.name, metadata.wordCount, metadata.characterCount);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
         metadata,
@@ -390,47 +403,102 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         language: metadata.language,
         processing: { ...currentDoc.processing, metadataProgress: 100, overallProgress: 65 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       // Step 4: Generate Statistics and Insights
+      pipelineDebugger.statisticsStarted(file.name);
+      
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.GeneratingStatistics,
         processing: { ...currentDoc.processing, statisticsProgress: 50, overallProgress: 85 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       const statistics = StatisticsService.calculateStatistics(content);
-      const insights = generateRealInsights(file.name, content.pages, metadata, statistics);
+      pipelineDebugger.statisticsCompleted(file.name, {
+        words: statistics.words,
+        sentences: statistics.sentences,
+        paragraphs: statistics.paragraphs,
+        readingTime: statistics.readingTime,
+      });
+      const insights = generateRealInsights(file.name, content.textPages || [], metadata, statistics);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
         statistics,
         insights,
         processing: { ...currentDoc.processing, statisticsProgress: 100, insightsProgress: 100, overallProgress: 95 }
       }) || currentDoc;
+      validateDocumentState(currentDoc, false);
       setDocumentState(currentDoc);
 
       // Step 5: Ready!
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.Ready,
-        processing: { ...currentDoc.processing, overallProgress: 100 }
+        processing: { ...currentDoc.processing, overallProgress: 100, startedAt: undefined },
+        processingError: undefined,
       }) || currentDoc;
+      validateDocumentState(currentDoc, true);
       setDocumentState(currentDoc);
+      
+      pipelineDebugger.documentReady(file.name, content.textPages?.length || 0);
 
     } catch (error) {
       console.error("Document processing failed:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error during processing";
+      pipelineDebugger.error(errorMessage, "PROCESSING_ERROR", {
+        fileName: file.name,
+        currentState: currentDoc?.status || DocumentStatus.Idle,
+      });
+      
       // Handle error state
-      const docId = document?.id;
+      const docId = currentDoc?.id || document?.id;
       if (docId) {
-        const errorDoc = await DocumentService.update(docId, { status: DocumentStatus.Error });
+        const processingError: ProcessingError = {
+          message: errorMessage,
+          code: "PROCESSING_ERROR",
+          timestamp: Date.now(),
+          state: currentDoc?.status || DocumentStatus.Idle,
+        };
+        const errorDoc = await DocumentService.update(docId, {
+          status: DocumentStatus.Error,
+          processingError,
+        });
         setDocumentState(errorDoc || null);
       }
     }
   }, [document]);
 
+  const retryProcessing = useCallback(async () => {
+    if (!fileToRetryRef.current) {
+      console.error("No file available for retry");
+      pipelineDebugger.error("No file available for retry", "RETRY_ERROR");
+      return;
+    }
+
+    pipelineDebugger.warning("Retrying document processing", { fileName: fileToRetryRef.current.name });
+
+    // Clear any existing document and retry upload
+    if (document) {
+      if (document.url) URL.revokeObjectURL(document.url);
+      await DocumentService.delete(document.id);
+    }
+
+    await uploadDocument(fileToRetryRef.current);
+  }, [document, uploadDocument]);
+
   const updateDocument = useCallback(
     async (updates: Partial<Document>) => {
       if (!document) return;
       const updated = await DocumentService.update(document.id, updates);
+      const validationResult = DocumentValidatorService.validateDocument(updated, { strict: false });
+      if (validationResult.errors.length > 0) {
+        console.error("Document update validation failed:", validationResult.errors);
+      }
+      if (validationResult.warnings.length > 0) {
+        console.warn("Document update validation warnings:", validationResult.warnings);
+      }
       setDocumentState(updated || null);
     },
     [document]
@@ -440,7 +508,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     setDocumentState((prev) => {
       if (prev) {
         if (prev.url) URL.revokeObjectURL(prev.url);
-        deleteDocumentFromDB(prev.id);
+        DocumentService.delete(prev.id);
       }
       return null;
     });
@@ -455,6 +523,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         clearDocument,
         hasDocument: !!document,
         updateDocument,
+        retryProcessing,
       }}
     >
       {children}

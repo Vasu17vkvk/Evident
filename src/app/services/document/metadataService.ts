@@ -2,7 +2,7 @@ import { DocumentMetadata, DocumentContent } from "../../types/document";
 
 export class MetadataService {
   static extractMetadata(fileName: string, fileSize: number, fileType: string, content?: DocumentContent): DocumentMetadata {
-    const pageCount = content?.pages?.length || 0;
+    const pageCount = content?.textPages?.length || 0;
     const fullText = content?.fullText || "";
     const words = fullText.split(/\s+/).filter(Boolean);
     const wordCount = words.length;

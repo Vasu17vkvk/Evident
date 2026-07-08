@@ -1,5 +1,11 @@
 import { DocumentContent } from "../../types/document";
+import { pipelineDebugger } from "../debug/pipelineDebugger";
 import mammoth from "mammoth";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+// Configure pdfjs worker path
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export class ParserService {
   static getExtension(name: string): string {
@@ -10,10 +16,6 @@ export class ParserService {
   static async extractPDFText(file: File): Promise<string[]> {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdfjsLib = await import("pdfjs-dist");
-      
-      // Set worker - use CDN as fallback or let pdfjs handle it
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
       
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
@@ -27,10 +29,13 @@ export class ParserService {
           .join(" ");
         pages.push(pageText.trim() || `[Page ${i} contains no extractable text]`);
       }
-      return pages;
+
+      return pages.length > 0 ? pages : ["Document contains no extractable text"];
     } catch (err) {
       console.error("PDF text extraction failed:", err);
-      return [];
+      const errorMessage = err instanceof Error ? err.message : "Unknown PDF extraction error";
+      pipelineDebugger.warning(errorMessage, { fileName: file.name, errorType: "PDF_EXTRACTION" });
+      return ["Failed to extract text from PDF document"];
     }
   }
 
@@ -45,7 +50,7 @@ export class ParserService {
       ]);
       
       const html = htmlResult.value;
-      const plainText = rawTextResult.value;
+      const plainText = rawTextResult.value || "";
       
       // Split HTML into "pages" (simulate by chunks, since DOCX doesn't have native pages)
       const htmlPages: string[] = [];
@@ -68,12 +73,12 @@ export class ParserService {
       }
 
       return {
-        htmlPages: htmlPages.length > 0 ? htmlPages : ["Document has no readable text content."],
+        htmlPages: htmlPages.length > 0 ? htmlPages : ["Document has no readable text content"],
         plainText
       };
     } catch (err) {
       console.error("DOCX text extraction failed:", err);
-      return { htmlPages: ["Document has no readable text content."], plainText: "" };
+      return { htmlPages: ["Failed to extract text from DOCX document"], plainText: "" };
     }
   }
 
@@ -89,32 +94,43 @@ export class ParserService {
           pages.push(text.substring(start, start + 1200));
           start += 1200;
         }
-        resolve(pages.length > 0 ? pages : ["Document has no readable text content."]);
+        resolve(pages.length > 0 ? pages : ["Document contains no extractable text"]);
       };
-      reader.onerror = () => resolve(["Failed to read plain text file contents."]);
+      reader.onerror = () => resolve(["Failed to read plain text file contents"]);
       reader.readAsText(file);
     });
   }
 
   static async parseFile(file: File): Promise<DocumentContent> {
     const extension = this.getExtension(file.name);
-    let pages: string[] = [];
+    let textPages: string[] = ["Unsupported file type"];
     let fullText = "";
 
     try {
       if (extension === "pdf") {
-        pages = await this.extractPDFText(file);
-        fullText = pages.join("\n");
+        textPages = await this.extractPDFText(file);
+        fullText = textPages.join("\n");
       } else if (extension === "docx") {
         const docxResult = await this.extractDOCXText(file);
-        pages = docxResult.htmlPages;
+        textPages = docxResult.htmlPages;
         fullText = docxResult.plainText;
       } else if (extension === "txt") {
-        pages = await this.readTxtFile(file);
-        fullText = pages.join("\n");
+        textPages = await this.readTxtFile(file);
+        fullText = textPages.join("\n");
+      } else {
+        textPages = ["Unsupported file type"];
+        fullText = "";
+        pipelineDebugger.warning(`Unsupported file type: ${extension}`, { fileName: file.name });
       }
     } catch (e) {
       console.error("File extraction pipeline failure:", e);
+      const errorMessage = e instanceof Error ? e.message : "Unknown parsing error";
+      pipelineDebugger.error(errorMessage, "PARSE_ERROR", {
+        fileName: file.name,
+        fileType: extension,
+      });
+      textPages = ["Failed to process document"];
+      fullText = "";
     }
 
     const paragraphs = fullText.split(/\n\s*\n/).filter(Boolean);
@@ -125,10 +141,10 @@ export class ParserService {
     );
 
     return {
-      pages,
-      fullText,
-      paragraphs,
-      sections
+      textPages: textPages.length > 0 ? textPages : ["Failed to process document"],
+      fullText: fullText || "",
+      paragraphs: paragraphs.length > 0 ? paragraphs : [],
+      sections: sections.length > 0 ? sections : []
     };
   }
 }

@@ -72,7 +72,7 @@ export interface DocumentMetadata {
 // New Content interface
 export interface DocumentContent {
   fullText?: string;
-  pages?: string[];
+  textPages?: string[];
   paragraphs?: string[];
   sections?: string[];
 }
@@ -99,6 +99,16 @@ export interface DocumentProcessing {
   statisticsProgress?: number;
   insightsProgress?: number;
   overallProgress?: number;
+  startedAt?: number; // Timestamp when processing began
+  timedOut?: boolean; // Whether processing timed out
+}
+
+// Processing error details
+export interface ProcessingError {
+  message: string;
+  code: string;
+  timestamp: number;
+  state: DocumentStatus;
 }
 
 // Complete Document interface
@@ -116,6 +126,7 @@ export interface Document {
   insights?: DocumentInsights;
   searchIndex?: any;
   processing?: DocumentProcessing;
+  processingError?: ProcessingError; // Error details if processing failed
   createdAt: Date;
   updatedAt: Date;
   // Keep existing fields for backwards compatibility
@@ -125,6 +136,10 @@ export interface Document {
   text?: string;
   url?: string; // object URL for preview
   pagesContent?: string[];
+  wordCount?: number;
+  characterCount?: number;
+  estimatedReadingTime?: number;
+  language?: string;
 }
 
 export type CreateDocumentInput = Partial<Omit<

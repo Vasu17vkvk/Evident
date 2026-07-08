@@ -3,7 +3,7 @@ import { DocumentStatistics, DocumentContent } from "../../types/document";
 export class StatisticsService {
   static calculateStatistics(content?: DocumentContent): DocumentStatistics {
     const fullText = content?.fullText || "";
-    const pages = content?.pages || [];
+    const textPages = content?.textPages || [];
     const paragraphs = content?.paragraphs || [];
     const sections = content?.sections || [];
 

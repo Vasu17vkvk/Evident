@@ -135,7 +135,7 @@ function EntityItem({ entity, type }: { entity: any; type: string }) {
   );
 }
 
-function TimelineItem({ item }: { item: typeof TIMELINE_MOCK_DATA[0] }) {
+function TimelineItem({ item }: { item: DocumentInsights['timeline'][0] }) {
   return (
     <div className="flex gap-3 mb-5 pl-4 relative border-l border-border last:border-transparent">
       <div className="absolute left-[-5px] top-0 size-2 bg-[#ff3d00] rounded-full" />
