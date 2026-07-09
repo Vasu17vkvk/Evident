@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { FileText, MessageSquare, BarChart3, FolderOpen } from "lucide-react";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
@@ -6,6 +6,7 @@ import { DocumentViewer } from "./DocumentViewer";
 import { AICopilotPanel } from "./AICopilotPanel";
 import { InsightsPanel } from "./InsightsPanel";
 import { useDocument } from "../../hooks/useDocument";
+import { SearchService, SearchResult } from "../../services/document/SearchService";
 
 type MobileTab = "document" | "copilot" | "insights" | "files";
 
@@ -34,16 +35,66 @@ export function WorkspaceLayout({
   const [mobileTab, setMobileTab] = useState<MobileTab>("document");
   const { document, hasDocument } = useDocument();
 
+  // Search Engine States
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
   // Emergency fallback: if doc isn't Ready for too long, disable AI/Insights/Search.
   const emergencyFallback = !!(document && document.status !== "Ready");
 
   // Only allow searching once full processing completed.
   const effectiveSearchQuery = emergencyFallback ? "" : searchQuery;
 
+  // Run search engine live
+  useEffect(() => {
+    if (effectiveSearchQuery && effectiveSearchQuery.trim().length > 1) {
+      const results = SearchService.search(document, effectiveSearchQuery);
+      setSearchResults(results);
+      if (results.length > 0) {
+        setActiveIndex(0);
+      } else {
+        setActiveIndex(null);
+      }
+    } else {
+      setSearchResults([]);
+      setActiveIndex(null);
+    }
+  }, [effectiveSearchQuery, document]);
+
+  // Shortcut Ctrl + F
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const handleNextResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    setActiveIndex((prev) => {
+      if (prev === null) return 0;
+      return (prev + 1) % searchResults.length;
+    });
+  }, [searchResults]);
+
+  const handlePrevResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    setActiveIndex((prev) => {
+      if (prev === null) return searchResults.length - 1;
+      return (prev - 1 + searchResults.length) % searchResults.length;
+    });
+  }, [searchResults]);
 
   // Use uploaded document name if available
   const displayDocumentName = hasDocument && document ? document.name : documentName;
-
 
   const mobileTabs: { id: MobileTab; label: string; icon: React.ElementType }[] = [
     { id: "document", label: "Document", icon: FileText },
@@ -87,6 +138,11 @@ export function WorkspaceLayout({
               setInsightsOpen((o) => !o);
             }
           }}
+          searchResultsCount={searchResults.length}
+          activeResultIndex={activeIndex}
+          onNextResult={handleNextResult}
+          onPrevResult={handlePrevResult}
+          searchInputRef={searchInputRef}
         />
 
       {/* ── Desktop layout: side-by-side panels ── */}
@@ -103,6 +159,8 @@ export function WorkspaceLayout({
           onViewChange={setCurrentView}
           searchQuery={effectiveSearchQuery}
           onInsightsToggle={() => setInsightsOpen((o) => !o)}
+          searchResults={searchResults}
+          activeIndex={activeIndex}
         />
         <div className="flex flex-col xl:flex-row xl:shrink-0 h-full">
           <AICopilotPanel
@@ -144,6 +202,8 @@ export function WorkspaceLayout({
               onViewChange={setCurrentView}
               searchQuery={effectiveSearchQuery}
               onInsightsToggle={() => setMobileTab("insights")}
+              searchResults={searchResults}
+              activeIndex={activeIndex}
             />
           )}
           {mobileTab === "copilot" && (
@@ -176,8 +236,10 @@ export function WorkspaceLayout({
               onPageChange={setCurrentPage}
               currentView={currentView}
               onViewChange={setCurrentView}
-              searchQuery={searchQuery}
+              searchQuery={effectiveSearchQuery}
               onInsightsToggle={() => setMobileTab("insights")}
+              searchResults={searchResults}
+              activeIndex={activeIndex}
             />
           )}
         </div>

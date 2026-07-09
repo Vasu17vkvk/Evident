@@ -20,6 +20,8 @@ interface Props {
   rotation?: number;
   /** Active search query from workspace header */
   searchQuery?: string;
+  searchResults?: any[];
+  activeIndex?: number | null;
 }
 
 export function PDFViewer({
@@ -29,6 +31,8 @@ export function PDFViewer({
   scale = 1,
   rotation = 0,
   searchQuery = "",
+  searchResults = [],
+  activeIndex = null,
 }: Props) {
   const [pdf, setPdf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -59,31 +63,30 @@ export function PDFViewer({
       });
   }, [url]);
 
-  // Auto-scroll PDF container to first matching page when searchQuery changes
+  // Scroll to active match when activeIndex or searchResults changes
   useEffect(() => {
-    if (searchQuery && searchQuery.trim().length > 1 && docObj && docObj.pagesContent) {
-      const query = searchQuery.toLowerCase();
-      const firstMatchingPageIdx = docObj.pagesContent.findIndex((pageText) =>
-        pageText.toLowerCase().includes(query)
-      );
-      if (firstMatchingPageIdx !== -1) {
-        const pageNum = firstMatchingPageIdx + 1;
-        if (pageNum !== lastPageRef.current) {
-          lastPageRef.current = pageNum;
-          onPageChange(pageNum);
-          
-          const targetPage = pageRefs.current[pageNum];
-          if (targetPage && scrollContainerRef.current) {
-            isProgrammaticScrollRef.current = true;
-            targetPage.scrollIntoView({ behavior: "smooth", block: "start" });
-            setTimeout(() => {
-              isProgrammaticScrollRef.current = false;
-            }, 850);
-          }
+    if (activeIndex !== null && searchResults && searchResults.length > 0) {
+      const activeMatch = searchResults[activeIndex];
+      if (activeMatch && activeMatch.page) {
+        if (activeMatch.page !== lastPageRef.current) {
+          lastPageRef.current = activeMatch.page;
+          onPageChange(activeMatch.page);
         }
+
+        setTimeout(() => {
+          const matchEl = window.document.getElementById(`search-match-${activeMatch.matchIndex}`);
+          if (matchEl) {
+            matchEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          } else {
+            const pageEl = pageRefs.current[activeMatch.page];
+            if (pageEl) {
+              pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          }
+        }, 150);
       }
     }
-  }, [searchQuery, docObj, onPageChange]);
+  }, [activeIndex, searchResults, onPageChange]);
 
   // Synchronize external pagination page updates (toolbar clicks)
   useEffect(() => {
@@ -167,6 +170,8 @@ export function PDFViewer({
               scale={scale}
               rotation={rotation}
               searchQuery={searchQuery}
+              searchResults={searchResults}
+              activeIndex={activeIndex}
             />
           </div>
         );
@@ -182,18 +187,22 @@ function PDFPage({
   scale,
   rotation,
   searchQuery,
+  searchResults = [],
+  activeIndex = null,
 }: {
   pdf: any;
   pageNumber: number;
   scale: number;
   rotation: number;
   searchQuery: string;
+  searchResults?: any[];
+  activeIndex?: number | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderTaskRef = useRef<any>(null);
   
   // Highlight layout coordinates states
-  const [highlights, setHighlights] = useState<Array<{ x: number; y: number; w: number; h: number }>>([]);
+  const [highlights, setHighlights] = useState<Array<{ x: number; y: number; w: number; h: number; matchIndex: number; isActive: boolean }>>([]);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
@@ -233,9 +242,15 @@ function PDFPage({
               const query = searchQuery.toLowerCase();
               const newHighlights: typeof highlights = [];
 
+              // Filter matches for this specific page
+              const pageMatches = (searchResults || []).filter((r) => r.page === pageNumber);
+              let pageMatchCounter = 0;
+
               for (const item of textContent.items) {
                 const str = item.str.toLowerCase();
                 if (str.includes(query)) {
+                  const matchInfo = pageMatches[pageMatchCounter];
+
                   // Transform contains coordinate matrix: transform[4]=x, transform[5]=y
                   const tx = item.transform;
                   const x = tx[4];
@@ -254,7 +269,13 @@ function PDFPage({
                     y: vy - vHeight, // offset back since converted base maps text baseline
                     w: vWidth,
                     h: vHeight,
+                    matchIndex: matchInfo ? matchInfo.matchIndex : -1,
+                    isActive: matchInfo ? matchInfo.matchIndex === activeIndex : false,
                   });
+
+                  if (matchInfo) {
+                    pageMatchCounter++;
+                  }
                 }
               }
               setHighlights(newHighlights);
@@ -275,7 +296,7 @@ function PDFPage({
         renderTaskRef.current.cancel();
       }
     };
-  }, [pdf, pageNumber, scale, rotation, searchQuery]);
+  }, [pdf, pageNumber, scale, rotation, searchQuery, searchResults, activeIndex]);
 
   return (
     <div 
@@ -290,7 +311,12 @@ function PDFPage({
       {highlights.map((h, i) => (
         <div
           key={i}
-          className="absolute bg-yellow-400/40 border border-yellow-500/50 pointer-events-none rounded-sm"
+          id={h.matchIndex !== -1 ? `search-match-${h.matchIndex}` : undefined}
+          className={`absolute pointer-events-none rounded-sm border transition-all duration-150 ${
+            h.isActive
+              ? "bg-[#ff9f00]/65 border-[#ff9f00]/90 shadow-md scale-105 z-10"
+              : "bg-[#ff3d00]/30 border-[#ff3d00]/50"
+          }`}
           style={{
             left: `${h.x}px`,
             top: `${h.y}px`,

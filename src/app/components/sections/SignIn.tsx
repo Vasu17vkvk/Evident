@@ -1,16 +1,16 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
-import { Eye, EyeOff, Lock, Mail, ArrowLeft, Shield, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { FadeIn, Stagger, StaggerItem } from "../layout/FadeIn";
+import { FadeIn } from "../layout/FadeIn";
 import { useAuth } from "../../context/AuthContext";
 
 export function SignIn() {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { login, register, loginWithGoogle, signIn } = useAuth();
+  const [view, setView] = useState<"options" | "email_login" | "email_signup">("options");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -25,7 +25,6 @@ export function SignIn() {
     setEmailError("");
     setPasswordError("");
 
-    // Email check
     if (!email) {
       setEmailError("Email address is required");
       isValid = false;
@@ -34,7 +33,6 @@ export function SignIn() {
       isValid = false;
     }
 
-    // Password check
     if (!password) {
       setPasswordError("Password is required");
       isValid = false;
@@ -46,237 +44,270 @@ export function SignIn() {
     return isValid;
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    toast.loading("Connecting Google account...", { id: "auth" });
+    try {
+      await loginWithGoogle();
+      toast.success("Welcome to Evident!", { id: "auth" });
+      navigate("/");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to authenticate with Google", { id: "auth" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmailSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
 
     setIsLoading(true);
-    toast.loading("Authenticating your credentials...", { id: "auth" });
-
-    // Simulate authentication delay
-    setTimeout(() => {
-      setIsLoading(false);
-      signIn(email);
-      toast.success("Successfully logged in!", { id: "auth" });
+    toast.loading(view === "email_login" ? "Signing in..." : "Creating account...", { id: "auth" });
+    try {
+      if (view === "email_login") {
+        await login(email, password);
+        toast.success("Successfully logged in!", { id: "auth" });
+      } else {
+        await register(email, password);
+        toast.success("Account created successfully!", { id: "auth" });
+      }
       navigate("/");
-    }, 1500);
+    } catch (err: any) {
+      toast.error(err.message || "Authentication failed", { id: "auth" });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleOAuthLogin = (provider: "google" | "github") => {
+  const handleGuestLogin = () => {
     setIsLoading(true);
-    toast.loading(`Redirecting to ${provider === "google" ? "Google" : "GitHub"} authorization...`, { id: "auth" });
-
+    toast.loading("Accessing workspace as Guest...", { id: "auth" });
     setTimeout(() => {
       setIsLoading(false);
-      signIn(`user@${provider}.com`);
-      toast.success("OAuth connection successful!", { id: "auth" });
+      signIn("guest@evident.com");
+      toast.success("Signed in as Guest User", { id: "auth" });
       navigate("/");
-    }, 1200);
+    }, 1000);
   };
 
   return (
-    <div className="relative min-h-screen grid grid-cols-1 lg:grid-cols-12 bg-background text-foreground overflow-hidden">
+    <div className="relative min-h-screen flex items-center justify-center bg-[#0a0a0a] text-foreground overflow-hidden px-4">
+      {/* Editorial dark mesh ambient backdrop */}
+      <div className="pointer-events-none absolute -left-20 -top-20 h-[500px] w-[500px] rounded-full bg-[#ff3d00]/5 blur-[120px]" />
+      <div className="pointer-events-none absolute -bottom-20 -right-20 h-[500px] w-[500px] rounded-full bg-[#ff3d00]/5 blur-[120px]" />
       
-      {/* Back to Home Header Link (Absolute for mobile/desktop toggle) */}
+      {/* Noise Grid */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.02] noise-texture" />
+
+      {/* Close/Back Home */}
       <Link
         to="/"
-        className="absolute top-6 left-6 z-50 group inline-flex items-center gap-2 text-xs font-mono-label uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+        className="absolute top-6 left-6 group inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
       >
-        <ArrowLeft className="size-4 transition-transform group-hover:-translate-x-1" strokeWidth={1.5} />
-        Back to Home
+        <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-1" strokeWidth={1.5} />
+        Exit to Home
       </Link>
 
-      {/* Left Column: Splash Branding Panel (Col span 5) */}
-      <div className="relative hidden lg:flex lg:col-span-5 flex-col justify-between p-12 border-r border-border bg-input/20">
-        {/* Dynamic Background Gradients */}
-        <div className="pointer-events-none absolute -left-20 -top-20 h-[300px] w-[300px] rounded-full bg-accent/5 blur-[80px]" />
-        <div className="pointer-events-none absolute -bottom-20 -right-20 h-[400px] w-[400px] rounded-full bg-accent/5 blur-[100px]" />
+      {/* Centered Premium Modal Card */}
+      <div className="relative w-full max-w-[440px] border border-border/80 bg-[#111111]/90 backdrop-blur-md p-8 md:p-10 shadow-2xl flex flex-col gap-8 select-none">
         
-        {/* Digital Grid Overlay */}
-        <div className="pointer-events-none absolute inset-0 opacity-[0.03] noise-texture" />
-
-        {/* Branding header */}
-        <div className="flex items-center gap-3 relative">
-          <span className="text-xl font-semibold tracking-tight text-white">
-            Evident
-          </span>
-          <span className="font-mono-label border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-accent">
-            Beta
-          </span>
-        </div>
-
-        {/* Splash Content Slider/Pillars */}
-        <Stagger className="flex flex-col gap-8 max-w-sm relative my-auto">
-          <StaggerItem>
-            <h2 className="text-3xl font-semibold tracking-tighter leading-tight text-foreground">
-              Master your document workflows with RAG
-            </h2>
-          </StaggerItem>
-          <StaggerItem className="flex items-start gap-4">
-            <Shield className="size-5 text-accent shrink-0 mt-1" strokeWidth={1.5} />
-            <div>
-              <h4 className="text-sm font-semibold text-foreground">Secure & Encrypted</h4>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                All document assets are parsed locally and stored in single-tenant encrypted partitions.
-              </p>
-            </div>
-          </StaggerItem>
-          <StaggerItem className="flex items-start gap-4">
-            <Sparkles className="size-5 text-accent shrink-0 mt-1" strokeWidth={1.5} />
-            <div>
-              <h4 className="text-sm font-semibold text-foreground">Zero Hallucinations</h4>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                We anchor model outputs to direct vector source excerpts so every claims has a bracket citation link.
-              </p>
-            </div>
-          </StaggerItem>
-        </Stagger>
-
-        {/* Bottom footer text */}
-        <div className="text-[10px] font-mono-label text-muted-foreground/60 relative">
-          © 2026 Evident AI Document Copilot. Protected by AES-256.
-        </div>
-      </div>
-
-      {/* Right Column: Sign In Form (Col span 7) */}
-      <div className="lg:col-span-7 flex items-center justify-center p-6 md:p-12 relative min-h-screen">
-        <div className="pointer-events-none absolute -bottom-40 left-1/2 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-accent/5 blur-[120px]" />
-        
-        <FadeIn className="w-full max-w-md flex flex-col gap-8">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tighter text-foreground mb-2">
-              Sign in to your account
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Enter your credentials or choose a social integration provider.
-            </p>
-          </div>
-
-          {/* Social Logins */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Google OAuth Button */}
-            <button
-              onClick={() => handleOAuthLogin("google")}
-              disabled={isLoading}
-              className="flex items-center justify-center gap-2 border border-border bg-input/10 hover:border-accent hover:bg-input/30 py-3 text-xs font-mono-label uppercase tracking-wider text-muted-foreground hover:text-foreground transition-all duration-200"
-            >
-              <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.465 0-6.273-2.808-6.273-6.273s2.808-6.273 6.273-6.273c1.558 0 2.977.568 4.07 1.51l3.056-3.056C19.062 2.378 15.892 1 12.24 1 5.86 1 .7 6.16.7 12.54S5.86 24.08 12.24 24.08c6.115 0 11.286-4.39 11.286-11.286 0-.745-.073-1.463-.207-2.155H12.24z" />
-              </svg>
-              Google
-            </button>
-
-            {/* GitHub OAuth Button */}
-            <button
-              onClick={() => handleOAuthLogin("github")}
-              disabled={isLoading}
-              className="flex items-center justify-center gap-2 border border-border bg-input/10 hover:border-accent hover:bg-input/30 py-3 text-xs font-mono-label uppercase tracking-wider text-muted-foreground hover:text-foreground transition-all duration-200"
-            >
-              <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
-              </svg>
-              GitHub
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="h-px flex-1 bg-border" />
-            <span className="font-mono-label text-[9px] uppercase tracking-wider text-muted-foreground/60">
-              Or Sign In with Email
+        {/* Header Accent Branding */}
+        <div className="flex flex-col items-center text-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl font-semibold tracking-tighter text-white font-sans uppercase">
+              Evident
             </span>
-            <div className="h-px flex-1 bg-border" />
+            <span className="font-mono text-[8px] border border-[#ff3d00]/30 bg-[#ff3d00]/10 px-1.5 py-0.5 uppercase tracking-widest text-[#ff3d00] font-semibold">
+              Beta
+            </span>
           </div>
-
-          {/* Form */}
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email" className="text-[10px] tracking-wider text-muted-foreground uppercase">
-                Email Address
-              </Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/60" strokeWidth={1.5} />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setEmailError("");
-                  }}
-                  className={`pl-10 h-12 bg-input/40 border ${
-                    emailError ? "border-destructive focus-visible:border-destructive" : "border-border focus-visible:border-accent"
-                  }`}
-                  disabled={isLoading}
-                />
-              </div>
-              {emailError && (
-                <p className="text-[10px] text-destructive tracking-wide mt-1 font-mono-label">{emailError}</p>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-[10px] tracking-wider text-muted-foreground uppercase">
-                  Password
-                </Label>
-                <button
-                  type="button"
-                  onClick={() => toast.info("Password reset link simulation sent!")}
-                  className="text-[10px] font-mono-label text-accent uppercase tracking-wider hover:underline"
-                  disabled={isLoading}
-                >
-                  Forgot password?
-                </button>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/60" strokeWidth={1.5} />
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setPasswordError("");
-                  }}
-                  className={`pl-10 pr-10 h-12 bg-input/40 border ${
-                    passwordError ? "border-destructive focus-visible:border-destructive" : "border-border focus-visible:border-accent"
-                  }`}
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors"
-                  disabled={isLoading}
-                >
-                  {showPassword ? <EyeOff className="size-4" strokeWidth={1.5} /> : <Eye className="size-4" strokeWidth={1.5} />}
-                </button>
-              </div>
-              {passwordError && (
-                <p className="text-[10px] text-destructive tracking-wide mt-1 font-mono-label">{passwordError}</p>
-              )}
-            </div>
-
-            <Button
-              type="submit"
-              disabled={isLoading}
-              className="w-full text-xs font-semibold py-5 mt-2"
-            >
-              {isLoading ? "Authenticating..." : "Sign In"}
-            </Button>
-          </form>
-
-          {/* Bottom Conversion Link */}
-          <p className="text-center text-xs text-muted-foreground">
-            Don't have an account?{" "}
-            <Link to="/pricing" className="text-accent hover:underline font-semibold">
-              Create an account
-            </Link>
+          <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+            Document Intelligence Platform
           </p>
-        </FadeIn>
+        </div>
 
+        {view === "options" ? (
+          <FadeIn className="flex flex-col gap-6 w-full">
+            <div className="text-center">
+              <h2 className="text-lg font-semibold tracking-tight text-white mb-1.5">
+                Welcome to Evident
+              </h2>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Connect your account or explore workspaces instantly.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {/* Google Button */}
+              <button
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
+                className="flex items-center justify-center gap-3 border border-border bg-[#181818]/60 hover:border-[#ff3d00]/50 hover:bg-[#1a1a1a] py-3.5 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-all duration-200 cursor-pointer disabled:opacity-50"
+              >
+                <svg className="size-4 shrink-0 text-white" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.465 0-6.273-2.808-6.273-6.273s2.808-6.273 6.273-6.273c1.558 0 2.977.568 4.07 1.51l3.056-3.056C19.062 2.378 15.892 1 12.24 1 5.86 1 .7 6.16.7 12.54S5.86 24.08 12.24 24.08c6.115 0 11.286-4.39 11.286-11.286 0-.745-.073-1.463-.207-2.155H12.24z" />
+                </svg>
+                Continue with Google
+              </button>
+
+              {/* Email Button */}
+              <button
+                onClick={() => setView("email_login")}
+                disabled={isLoading}
+                className="flex items-center justify-center gap-3 border border-border bg-[#181818]/60 hover:border-[#ff3d00]/50 hover:bg-[#1a1a1a] py-3.5 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-all duration-200 cursor-pointer disabled:opacity-50"
+              >
+                <Mail className="size-4 shrink-0" strokeWidth={1.5} />
+                Continue with Email
+              </button>
+
+              <div className="flex items-center gap-3 py-2">
+                <div className="h-px flex-1 bg-border/40" />
+                <span className="font-mono text-[8px] uppercase tracking-widest text-muted-foreground/40">
+                  Or
+                </span>
+                <div className="h-px flex-1 bg-border/40" />
+              </div>
+
+              {/* Guest Button */}
+              <button
+                onClick={handleGuestLogin}
+                disabled={isLoading}
+                className="flex items-center justify-center gap-3 border border-[#ff3d00]/30 bg-[#ff3d00]/5 hover:border-[#ff3d00] hover:bg-[#ff3d00]/10 py-3.5 text-xs font-mono uppercase tracking-wider text-[#ff3d00] hover:text-[#ff3d00] transition-all duration-200 cursor-pointer disabled:opacity-50"
+              >
+                Continue as Guest
+              </button>
+            </div>
+          </FadeIn>
+        ) : (
+          <FadeIn className="flex flex-col gap-5 w-full">
+            <div className="text-center">
+              <h2 className="text-lg font-semibold tracking-tight text-white mb-1">
+                {view === "email_login" ? "Sign In" : "Create Account"}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {view === "email_login" ? "Enter your email credentials" : "Choose email details to register"}
+              </p>
+            </div>
+
+            <form className="flex flex-col gap-4" onSubmit={handleEmailSubmit}>
+              {/* Email Input */}
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="email" className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase">
+                  Email Address
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50" strokeWidth={1.5} />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@domain.com"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setEmailError("");
+                    }}
+                    className={`pl-10 h-11 bg-input/20 border text-xs ${
+                      emailError ? "border-destructive focus-visible:border-destructive" : "border-border focus-visible:border-[#ff3d00]/50"
+                    }`}
+                    disabled={isLoading}
+                  />
+                </div>
+                {emailError && (
+                  <p className="text-[9px] text-destructive tracking-wide font-mono mt-0.5">{emailError}</p>
+                )}
+              </div>
+
+              {/* Password Input */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password" className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase">
+                    Password
+                  </Label>
+                  {view === "email_login" && (
+                    <button
+                      type="button"
+                      onClick={() => toast.info("Password resets are simulated in beta mode.")}
+                      className="text-[9px] font-mono text-[#ff3d00] uppercase tracking-wider hover:underline"
+                      disabled={isLoading}
+                    >
+                      Forgot?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50" strokeWidth={1.5} />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setPasswordError("");
+                    }}
+                    className={`pl-10 pr-10 h-11 bg-input/20 border text-xs ${
+                      passwordError ? "border-destructive focus-visible:border-destructive" : "border-border focus-visible:border-[#ff3d00]/50"
+                    }`}
+                    disabled={isLoading}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+                    disabled={isLoading}
+                  >
+                    {showPassword ? <EyeOff className="size-4" strokeWidth={1.5} /> : <Eye className="size-4" strokeWidth={1.5} />}
+                  </button>
+                </div>
+                {passwordError && (
+                  <p className="text-[9px] text-destructive tracking-wide font-mono mt-0.5">{passwordError}</p>
+                )}
+              </div>
+
+              {/* Submit Trigger */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-[#ff3d00] hover:bg-[#ff3d00]/90 text-white font-mono text-xs uppercase tracking-wider py-3 mt-2 font-semibold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  view === "email_login" ? "Sign In" : "Register Account"
+                )}
+              </button>
+            </form>
+
+            <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-border/40 text-center">
+              <button
+                onClick={() => {
+                  setView(view === "email_login" ? "email_signup" : "email_login");
+                  setEmailError("");
+                  setPasswordError("");
+                }}
+                disabled={isLoading}
+                className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:underline cursor-pointer disabled:opacity-50"
+              >
+                {view === "email_login" ? "Don't have an account? Sign Up" : "Already registered? Sign In"}
+              </button>
+              <button
+                onClick={() => {
+                  setView("options");
+                  setEmailError("");
+                  setPasswordError("");
+                }}
+                disabled={isLoading}
+                className="text-[10px] font-mono uppercase tracking-wider text-[#ff3d00]/80 hover:text-[#ff3d00] cursor-pointer disabled:opacity-50"
+              >
+                Back to Options
+              </button>
+            </div>
+          </FadeIn>
+        )}
       </div>
     </div>
   );

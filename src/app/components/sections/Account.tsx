@@ -176,7 +176,7 @@ export function Account() {
                         <div className="relative">
                           <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50" strokeWidth={1.5} />
                           <Input
-                            value={user.email}
+                            value={user.email ?? ""}
                             readOnly
                             className="h-11 pl-9 bg-muted/20 border-border text-muted-foreground cursor-not-allowed"
                           />

@@ -13,63 +13,23 @@ import {
   RotateCw,
   Printer,
   RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useDocument } from "../../hooks/useDocument";
-import { PDFViewer } from "./PDFViewer";
+import { DocumentRenderer } from "./DocumentRenderer";
 import { DocumentStatus } from "../../types/document";
 import { ProcessingPipeline } from "./ProcessingPipeline";
 import { ProcessingErrorDisplay } from "./ProcessingErrorDisplay";
-
-function highlightHtml(html: string, search: string) {
-  if (!search || !search.trim()) return html;
-
-  const escapedSearch = search.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-  const regex = new RegExp(`(${escapedSearch})`, "gi");
-  const parts = html.split(/(<[^>]+>)/g);
-
-  return parts
-    .map((part) => {
-      if (part.startsWith("<") && part.endsWith(">")) {
-        return part;
-      }
-      return part.replace(regex, '<mark class="bg-[#ff3d00]/30 text-[#ff3d00] font-medium border-b border-[#ff3d00]/60 px-0.5 rounded-sm">$1</mark>');
-    })
-    .join("");
-}
-
-function HighlightText({ text, search, isHtml }: { text: string; search: string; isHtml?: boolean }) {
-  if (isHtml) {
-    const highlightedHtml = highlightHtml(text, search);
-    return (
-      <div
-        className="text-[12px] leading-relaxed text-foreground select-text [&_p]:mb-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:mb-1 [&_strong]:font-bold [&_em]:italic [&_b]:font-bold [&_i]:italic [&_br]:mb-2"
-        dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-      />
-    );
-  }
-
-  if (!search || !search.trim()) {
-    return <p className="text-[12px] leading-relaxed text-foreground whitespace-pre-wrap select-text">{text}</p>;
-  }
-
-  const regex = new RegExp(`(${search.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
-  const parts = text.split(regex);
-
-  return (
-    <p className="text-[12px] leading-relaxed text-foreground whitespace-pre-wrap select-text">
-      {parts.map((part, i) =>
-        regex.test(part) ? (
-          <mark key={i} className="bg-[#ff3d00]/30 text-[#ff3d00] font-medium border-b border-[#ff3d00]/60 px-0.5 rounded-sm">
-            {part}
-          </mark>
-        ) : (
-          part
-        )
-      )}
-    </p>
-  );
-}
+import { ExportService } from "../../services/export/ExportService";
+import { downloadBlob } from "../../utils/download";
+import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "../ui/dropdown-menu";
 
 interface Props {
   documentName?: string;
@@ -79,6 +39,8 @@ interface Props {
   onViewChange: (view: "pdf" | "text") => void;
   searchQuery: string;
   onInsightsToggle?: () => void;
+  searchResults?: any[];
+  activeIndex?: number | null;
 }
 
 export function DocumentViewer({
@@ -89,15 +51,14 @@ export function DocumentViewer({
   onViewChange,
   searchQuery,
   onInsightsToggle,
+  searchResults = [],
+  activeIndex = null,
 }: Props) {
   const navigate = useNavigate();
   const { document, hasDocument, retryProcessing } = useDocument();
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const isProgrammaticScrollRef = useRef(false);
 
   const shouldShowProcessing =
     hasDocument && document
@@ -108,6 +69,29 @@ export function DocumentViewer({
   // If document.status !== Ready for more than 10 seconds, disable AI/Insights/Search but keep PDF viewer + navigation.
   const [processingFallback, setProcessingFallback] = useState(false);
   const processingTimeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Inside DocumentViewer log requirements
+  console.log("[EVIDENT] Inside DocumentViewer:", {
+    hasDocument,
+    status: document?.status,
+    content: document?.content,
+    metadata: document?.metadata,
+  });
+
+  // Log reasons for blocking workspace rendering
+  const isBlockedFromRendering = !hasDocument || !document || document.status === DocumentStatus.Error || (shouldShowProcessing && !processingFallback);
+  if (isBlockedFromRendering) {
+    const reasons: string[] = [];
+    if (!hasDocument) reasons.push("hasDocument is false");
+    if (!document) reasons.push("document object is null/undefined");
+    if (document && document.status === DocumentStatus.Error) reasons.push("document status is Error");
+    if (document && shouldShowProcessing && !processingFallback) {
+      reasons.push(`shouldShowProcessing is true (status is ${document.status}, content.fullText is ${!!document.content?.fullText ? "present" : "missing"}, pagesContent is ${document.pagesContent?.length || 0})`);
+    }
+    console.log("[EVIDENT] Workspace rendering is blocked. Reasons:", reasons.join(", "));
+  } else {
+    console.log("[EVIDENT] Workspace rendering is not blocked.");
+  }
 
   useEffect(() => {
     if (!hasDocument || !document) {
@@ -157,42 +141,39 @@ export function DocumentViewer({
   }, [onPageChange]);
 
   const handleToolbarPageChange = useCallback((pageNum: number) => {
-    isProgrammaticScrollRef.current = true;
     onPageChange(pageNum);
-    const targetPage = pageRefs.current[pageNum];
-    if (targetPage) {
-      targetPage.scrollIntoView({ behavior: "smooth", block: "start" });
-      setTimeout(() => {
-        isProgrammaticScrollRef.current = false;
-      }, 850);
-    }
   }, [onPageChange]);
 
-  const handleScroll = useCallback(() => {
-    if (isProgrammaticScrollRef.current) return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
+  const [isExporting, setIsExporting] = useState(false);
 
-    const containerCenter = container.getBoundingClientRect().top + container.clientHeight / 2;
-    let closestPage = 1;
-    let minDistance = Infinity;
+  const handleExport = useCallback(async (format: string) => {
+    if (!document || isExporting) return;
 
-    Object.entries(pageRefs.current).forEach(([pageNumStr, el]) => {
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const pageCenter = rect.top + rect.height / 2;
-      const distance = Math.abs(containerCenter - pageCenter);
+    setIsExporting(true);
+    toast.loading(`Generating ${format.toUpperCase()} export...`, { id: "export-toast" });
 
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPage = parseInt(pageNumStr, 10);
-      }
-    });
+    try {
+      // Simulate short delay to display loading state
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
-    if (closestPage !== currentPage) {
-      onPageChange(closestPage);
+      const result = await ExportService.export(document, format, {
+        includeContent: true,
+        includeMetadata: true,
+        includeInsights: true,
+        includeStatistics: true,
+      });
+
+      // Browser automatic download
+      downloadBlob(result.content as Blob, result.fileName);
+
+      toast.success(`${format.toUpperCase()} export downloaded successfully!`, { id: "export-toast" });
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error(`Failed to generate ${format.toUpperCase()} export.`, { id: "export-toast" });
+    } finally {
+      setIsExporting(false);
     }
-  }, [currentPage, onPageChange]);
+  }, [document, isExporting]);
 
   const handleDownload = useCallback(() => {
     if (document && document.url) {
@@ -392,14 +373,39 @@ export function DocumentViewer({
                   <Printer className="size-3.5" strokeWidth={1.5} />
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="flex size-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                  title="Download file"
-                >
-                  <Download className="size-3.5" strokeWidth={1.5} />
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={isExporting}
+                      className="flex size-7 items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors cursor-pointer"
+                      title="Export Document"
+                    >
+                      {isExporting ? (
+                        <Loader2 className="size-3.5 animate-spin text-[#ff3d00]" />
+                      ) : (
+                        <Download className="size-3.5" strokeWidth={1.5} />
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40 bg-popover text-popover-foreground border border-border p-1 rounded-md shadow-md z-50">
+                    <DropdownMenuItem onClick={() => handleExport("PDF")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                      PDF (.pdf)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("Markdown")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                      Markdown (.md)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("TXT")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                      Text (.txt)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("JSON")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                      JSON (.json)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("CSV")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                      CSV (.csv)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <button
                   type="button"
@@ -421,68 +427,17 @@ export function DocumentViewer({
               </div>
             </div>
 
-            {(currentView === "text" || document.extension !== "pdf") ? (
-              <div
-                ref={scrollContainerRef}
-                onScroll={handleScroll}
-                className="flex-1 overflow-y-auto bg-secondary px-4 py-8 md:px-10 md:py-12 flex flex-col items-center scroll-smooth"
-              >
-                <div
-                  className="mx-auto w-full max-w-[680px] flex flex-col gap-8 transition-transform duration-200 ease-out origin-top"
-                  style={{ transform: `scale(${scale})` }}
-                >
-                  {Array.from({ length: Math.max(document?.pages || 1, document?.pagesContent?.length || 1) }).map((_, idx) => {
-                    const pNum = idx + 1;
-                    const pText = document?.pagesContent?.[idx] || "No text content available for this page yet.";
-
-                    return (
-                      <div
-                        key={pNum}
-                        ref={(el) => {
-                          pageRefs.current[pNum] = el;
-                        }}
-                        className="border border-border bg-card p-4 sm:p-8 md:p-10 min-h-[500px] sm:min-h-[650px] shadow-lg relative flex flex-col justify-between"
-                      >
-                        <div className="absolute left-0 top-0 h-[2px] w-16 bg-[#ff3d00]" />
-
-                        <div className="flex items-center justify-between border-b border-border/40 pb-4 mb-6">
-                          <span className="font-mono text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
-                            Page {pNum} of {Math.max(document?.pages || 1, document?.pagesContent?.length || 1)}
-                          </span>
-                          <span className="font-mono text-[8px] uppercase tracking-[0.15em] text-[#ff3d00]/70">
-                            Evident AI Reader View
-                          </span>
-                        </div>
-
-                        <div className="flex-1 flex flex-col justify-start select-text">
-                          <HighlightText
-                            text={pText}
-                            search={searchQuery}
-                            isHtml={document?.extension === "docx"}
-                          />
-                        </div>
-
-                        <div className="border-t border-border/40 pt-4 mt-8">
-                          <p className="font-mono text-[8px] uppercase tracking-[0.15em] text-muted-foreground/45">
-                            All insights are linked back to cited page segments
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="h-12" />
-              </div>
-            ) : (
-              <PDFViewer
-                url={document.url || ""}
-                currentPage={currentPage}
-                onPageChange={onPageChange}
-                scale={scale}
-                rotation={rotation}
-                searchQuery={searchQuery}
-              />
-            )}
+            <DocumentRenderer
+              document={document}
+              currentPage={currentPage}
+              onPageChange={onPageChange}
+              scale={scale}
+              rotation={rotation}
+              searchQuery={searchQuery}
+              currentView={currentView}
+              searchResults={searchResults}
+              activeIndex={activeIndex}
+            />
           </>
         )
       ) : (

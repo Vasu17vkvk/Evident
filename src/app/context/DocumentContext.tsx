@@ -242,17 +242,63 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileToRetryRef = useRef<File | null>(null);
 
+  const setDocument = useCallback((nextDoc: Document | null | ((prev: Document | null) => Document | null)) => {
+    if (typeof nextDoc === "function") {
+      console.log("[EVIDENT] setDocument() called with functional update");
+    } else {
+      console.log("[EVIDENT] setDocument() called with:", nextDoc);
+    }
+    setDocumentState(nextDoc);
+  }, []);
+
+  // Track status transitions
+  const lastStatusRef = useRef<DocumentStatus | undefined>(undefined);
+
+  useEffect(() => {
+    const hasDoc = !!document;
+    console.log("[EVIDENT] document.status:", document ? document.status : "null");
+    console.log("[EVIDENT] hasDocument:", hasDoc);
+    console.log("[EVIDENT] document.content:", document ? document.content : "null");
+    console.log("[EVIDENT] document.metadata:", document ? document.metadata : "null");
+    console.log("[EVIDENT] document.statistics:", document ? document.statistics : "null");
+
+    if (document) {
+      if (lastStatusRef.current !== document.status) {
+        let displayStatus = document.status as string;
+        if (displayStatus === DocumentStatus.ExtractingMetadata) {
+          displayStatus = "Metadata";
+        } else if (displayStatus === DocumentStatus.GeneratingStatistics) {
+          displayStatus = "Statistics";
+        }
+        console.log(`[EVIDENT] Status -> ${displayStatus}`);
+        lastStatusRef.current = document.status;
+      }
+
+      const validationResult = DocumentValidatorService.validateDocument(document, { strict: false });
+      console.log("[EVIDENT] validationResult:", validationResult);
+      if (!validationResult.isValid) {
+        console.log("[EVIDENT] Validation failures:", validationResult.errors);
+      }
+    } else {
+      if (lastStatusRef.current !== undefined) {
+        console.log("[EVIDENT] Status -> None");
+        lastStatusRef.current = undefined;
+      }
+      console.log("[EVIDENT] validationResult: null");
+    }
+  }, [document]);
+
   // Restore active session on mount
   useEffect(() => {
     const activeId = localStorage.getItem("activeDocumentId");
     if (activeId) {
       DocumentService.get(activeId).then((restoredDoc) => {
         if (restoredDoc) {
-          setDocumentState(restoredDoc);
+          setDocument(restoredDoc);
         }
       });
     }
-  }, []);
+  }, [setDocument]);
 
   // Monitor processing timeout
   useEffect(() => {
@@ -287,7 +333,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...document.processing, timedOut: true },
       });
 
-      setDocumentState(errorDoc || null);
+      setDocument(errorDoc || null);
       console.error("Processing timeout:", processingError.message);
       pipelineDebugger.error(
         processingError.message,
@@ -302,7 +348,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         timeoutIdRef.current = null;
       }
     };
-  }, [document?.id, document?.status]);
+  }, [document?.id, document?.status, setDocument]);
 
   const validateDocumentState = useCallback((doc: Document | null | undefined, strict = false) => {
     const result = DocumentValidatorService.validateDocument(doc, { strict });
@@ -310,6 +356,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     if (result.errors.length > 0) {
       const errorSummary = result.errors.map((issue) => `${issue.field}: ${issue.message}`).join("; ");
       console.error("Document validation failed:", errorSummary);
+      console.log("[EVIDENT] Validation failures list:", result.errors);
       if (strict) {
         throw new Error(errorSummary);
       }
@@ -331,7 +378,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     fileToRetryRef.current = file;
     
     // Revoke any previous object URL
-    setDocumentState((prev) => {
+    setDocument((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
       return null;
     });
@@ -355,7 +402,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         status: DocumentStatus.Uploading,
       }) || currentDoc;
 
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
       localStorage.setItem("activeDocumentId", currentDoc.id);
       
       pipelineDebugger.uploadCompleted(file.name);
@@ -368,7 +415,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, parseProgress: 50, overallProgress: 35 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       const content = await ParserService.parseFile(file);
       pipelineDebugger.parsingCompleted(file.name, content.textPages?.length || 0);
@@ -380,7 +427,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, parseProgress: 100, overallProgress: 45 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       // Step 3: Extract Metadata
       pipelineDebugger.metadataStarted(file.name);
@@ -390,10 +437,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, metadataProgress: 50, overallProgress: 55 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       const metadata = MetadataService.extractMetadata(file.name, file.size, file.type, content);
-      pipelineDebugger.metadataCompleted(file.name, metadata.wordCount, metadata.characterCount);
+      pipelineDebugger.metadataCompleted(file.name, metadata.wordCount ?? 0, metadata.characterCount ?? 0);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
         metadata,
@@ -404,7 +451,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, metadataProgress: 100, overallProgress: 65 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       // Step 4: Generate Statistics and Insights
       pipelineDebugger.statisticsStarted(file.name);
@@ -414,14 +461,14 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, statisticsProgress: 50, overallProgress: 85 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       const statistics = StatisticsService.calculateStatistics(content);
       pipelineDebugger.statisticsCompleted(file.name, {
-        words: statistics.words,
-        sentences: statistics.sentences,
-        paragraphs: statistics.paragraphs,
-        readingTime: statistics.readingTime,
+        words: statistics.words ?? 0,
+        sentences: statistics.sentences ?? 0,
+        paragraphs: statistics.paragraphs ?? 0,
+        readingTime: statistics.readingTime ?? 0,
       });
       const insights = generateRealInsights(file.name, content.textPages || [], metadata, statistics);
       
@@ -431,7 +478,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processing: { ...currentDoc.processing, statisticsProgress: 100, insightsProgress: 100, overallProgress: 95 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
 
       // Step 5: Ready!
       currentDoc = await DocumentService.update(currentDoc.id, {
@@ -440,7 +487,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         processingError: undefined,
       }) || currentDoc;
       validateDocumentState(currentDoc, true);
-      setDocumentState(currentDoc);
+      setDocument(currentDoc);
       
       pipelineDebugger.documentReady(file.name, content.textPages?.length || 0);
 
@@ -465,10 +512,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
           status: DocumentStatus.Error,
           processingError,
         });
-        setDocumentState(errorDoc || null);
+        setDocument(errorDoc || null);
       }
     }
-  }, [document]);
+  }, [document, setDocument, validateDocumentState]);
 
   const retryProcessing = useCallback(async () => {
     if (!fileToRetryRef.current) {
@@ -490,22 +537,27 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
   const updateDocument = useCallback(
     async (updates: Partial<Document>) => {
-      if (!document) return;
+      console.log("[EVIDENT] updateDocument() called with updates:", updates);
+      if (!document) {
+        console.log("[EVIDENT] updateDocument blocked: no active document");
+        return;
+      }
       const updated = await DocumentService.update(document.id, updates);
       const validationResult = DocumentValidatorService.validateDocument(updated, { strict: false });
       if (validationResult.errors.length > 0) {
         console.error("Document update validation failed:", validationResult.errors);
+        console.log("[EVIDENT] Validation failures list during update:", validationResult.errors);
       }
       if (validationResult.warnings.length > 0) {
         console.warn("Document update validation warnings:", validationResult.warnings);
       }
-      setDocumentState(updated || null);
+      setDocument(updated || null);
     },
-    [document]
+    [document, setDocument]
   );
 
   const clearDocument = useCallback(() => {
-    setDocumentState((prev) => {
+    setDocument((prev) => {
       if (prev) {
         if (prev.url) URL.revokeObjectURL(prev.url);
         DocumentService.delete(prev.id);
@@ -513,7 +565,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       return null;
     });
     localStorage.removeItem("activeDocumentId");
-  }, []);
+  }, [setDocument]);
 
   return (
     <DocumentContext.Provider

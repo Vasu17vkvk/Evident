@@ -16,7 +16,7 @@ const NAV_ITEMS = [
 ];
 
 function UserMenu() {
-  const { user, signOut } = useAuth();
+  const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -85,7 +85,7 @@ function UserMenu() {
             <button
               onClick={() => {
                 setOpen(false);
-                signOut();
+                logout();
               }}
               className="flex w-full items-center gap-3 px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
@@ -100,7 +100,7 @@ function UserMenu() {
 }
 
 export function Nav() {
-  const { isAuthenticated, user, signOut } = useAuth();
+  const { isAuthenticated, user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
@@ -248,7 +248,7 @@ export function Nav() {
                     My Account
                   </Link>
                   <button
-                    onClick={() => { setMobileOpen(false); signOut(); }}
+                    onClick={() => { setMobileOpen(false); logout(); }}
                     className="flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors text-left"
                   >
                     <LogOut className="size-4 text-accent" strokeWidth={1.5} />
