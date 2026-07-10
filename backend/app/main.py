@@ -14,6 +14,7 @@ origins = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://evident-murex.vercel.app/"
 ]
 
 app.add_middleware(
@@ -62,4 +63,4 @@ async def ai_test():
         raise HTTPException(
             status_code=500,
             detail=f"Gemini Test Failed: {str(e)}"
-        )
+        )
