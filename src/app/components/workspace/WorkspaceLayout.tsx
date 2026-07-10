@@ -118,45 +118,45 @@ export function WorkspaceLayout({
           }
         }
       `}</style>
-        <WorkspaceHeader
-          documentName={displayDocumentName}
-          userName={userName}
-          userEmail={userEmail}
-          userInitials={userInitials}
-          searchQuery={searchQuery}
-          onSearchChange={(q) => {
-            if (emergencyFallback) return;
-            setSearchQuery(q);
-          }}
-          onSidebarToggle={() => setSidebarOpen((o) => !o)}
-          onCopilotToggle={() => {
-            if (emergencyFallback) {
-              // Prevent trapping user into AI UI during long processing.
-              return;
-            }
-            // On mobile: switch to copilot tab
-            if (window.innerWidth < 1024) {
-              setMobileTab("copilot");
-            } else {
-              setCopilotOpen((o) => !o);
-            }
-          }}
-          onInsightsToggle={() => {
-            if (emergencyFallback) {
-              return;
-            }
-            if (window.innerWidth < 1024) {
-              setMobileTab("insights");
-            } else {
-              setInsightsOpen((o) => !o);
-            }
-          }}
-          searchResultsCount={searchResults.length}
-          activeResultIndex={activeIndex}
-          onNextResult={handleNextResult}
-          onPrevResult={handlePrevResult}
-          searchInputRef={searchInputRef}
-        />
+      <WorkspaceHeader
+        documentName={displayDocumentName}
+        userName={userName}
+        userEmail={userEmail}
+        userInitials={userInitials}
+        searchQuery={searchQuery}
+        onSearchChange={(q) => {
+          if (emergencyFallback) return;
+          setSearchQuery(q);
+        }}
+        onSidebarToggle={() => setSidebarOpen((o) => !o)}
+        onCopilotToggle={() => {
+          if (emergencyFallback) {
+            // Prevent trapping user into AI UI during long processing.
+            return;
+          }
+          // On mobile: switch to copilot tab
+          if (window.innerWidth < 1024) {
+            setMobileTab("copilot");
+          } else {
+            setCopilotOpen((o) => !o);
+          }
+        }}
+        onInsightsToggle={() => {
+          if (emergencyFallback) {
+            return;
+          }
+          if (window.innerWidth < 1024) {
+            setMobileTab("insights");
+          } else {
+            setInsightsOpen((o) => !o);
+          }
+        }}
+        searchResultsCount={searchResults.length}
+        activeResultIndex={activeIndex}
+        onNextResult={handleNextResult}
+        onPrevResult={handlePrevResult}
+        searchInputRef={searchInputRef}
+      />
 
       {/* ── Desktop layout: side-by-side panels ── */}
       <div className="relative hidden lg:flex flex-1 overflow-hidden">
@@ -205,7 +205,7 @@ export function WorkspaceLayout({
       </div>
 
       {/* ── Mobile layout: tabbed panels ── */}
-      <div 
+      <div
         className="flex lg:hidden flex-1 flex-col overflow-hidden"
         style={{
           paddingBottom: "calc(var(--navbar-height) + env(safe-area-inset-bottom))",
@@ -285,7 +285,7 @@ export function WorkspaceLayout({
         </div>
 
         {/* ── Mobile bottom tab bar ── */}
-        <nav 
+        <nav
           className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background flex items-stretch"
           style={{
             paddingBottom: "env(safe-area-inset-bottom)",
@@ -304,18 +304,16 @@ export function WorkspaceLayout({
                   }
                   setMobileTab(id);
                 }}
-                className={`flex flex-1 flex-col items-center justify-center gap-1 py-3 transition-colors relative ${
-                  isActive
+                className={`flex flex-1 flex-col items-center justify-center gap-1 py-3 transition-colors relative ${isActive
                     ? "text-[#ff3d00]"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                  }`}
                 aria-label={label}
               >
                 {/* Active top accent line */}
                 <span
-                  className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full transition-all duration-200 ${
-                    isActive ? "bg-[#ff3d00] opacity-100" : "opacity-0"
-                  }`}
+                  className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full transition-all duration-200 ${isActive ? "bg-[#ff3d00] opacity-100" : "opacity-0"
+                    }`}
                 />
                 <Icon className={`${isActive ? "size-5" : "size-4"} transition-all duration-150`} strokeWidth={isActive ? 2 : 1.5} />
                 <span className={`font-mono text-[8px] uppercase tracking-wider transition-all duration-150 ${isActive ? "font-semibold" : ""}`}>
