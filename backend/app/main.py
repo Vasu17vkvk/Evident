@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import upload_router, chat_router
@@ -8,40 +8,33 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Allowed frontend origins
 origins = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://evident-murex.vercel.app/"
+    "https://evident-murex.vercel.app",
+    "https://*.vercel.app"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:5173",
+        "https://evident-murex.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Register API routes
 app.include_router(upload_router)
 app.include_router(chat_router)
 
-
 @app.get("/")
 async def root():
-    return {
-        "message": "Evident API Running"
-    }
-
+    return {"message": "Evident API Running"}
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy"
-    }
+    return {"status": "healthy"}
 
 
 @app.get("/ai-test")
