@@ -111,6 +111,13 @@ export interface ProcessingError {
   state: DocumentStatus;
 }
 
+// Storage metadata returned by the upload-url API
+export interface DocumentStorage {
+  objectKey: string;
+  fileUrl: string;
+  provider: "mock" | "s3";
+}
+
 // Complete Document interface
 export interface Document {
   id: string;
@@ -135,6 +142,7 @@ export interface Document {
   thumbnail?: string;
   text?: string;
   url?: string; // object URL for preview
+  storage?: DocumentStorage; // remote storage metadata from upload-url API
   pagesContent?: string[];
   wordCount?: number;
   characterCount?: number;

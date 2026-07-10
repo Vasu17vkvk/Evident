@@ -19,6 +19,7 @@ import { MetadataService } from "../services/document/metadataService";
 import { StatisticsService } from "../services/document/statisticsService";
 import { DocumentValidatorService } from "../services/document/documentValidatorService";
 import { pipelineDebugger } from "../services/debug/pipelineDebugger";
+import { requestUploadUrl } from "../../services/api/api";
 
 // Timeout duration for processing states (15 seconds)
 const PROCESSING_TIMEOUT_MS = 15000;
@@ -49,7 +50,7 @@ interface DocumentContextType {
 export const DocumentContext = createContext<DocumentContextType | null>(null);
 
 /* ── Dynamic Insights Generator ─────────────────────────── */
-function generateRealInsights(
+export function generateRealInsights(
   fileName: string, 
   pagesContent: string[] = [], 
   metadata?: { 
@@ -404,7 +405,25 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
       setDocument(currentDoc);
       localStorage.setItem("activeDocumentId", currentDoc.id);
-      
+
+      // Step 1b: Request a remote upload URL (non-blocking — never fails the pipeline)
+      try {
+        const uploadUrlResponse = await requestUploadUrl({
+          filename: file.name,
+          contentType: file.type,
+        });
+        const storage = {
+          objectKey: uploadUrlResponse.objectKey,
+          fileUrl: uploadUrlResponse.fileUrl,
+          provider: "mock" as const,
+        };
+        currentDoc = await DocumentService.update(currentDoc.id, { storage }) || currentDoc;
+        setDocument(currentDoc);
+        console.log("[EVIDENT] upload-url acquired:", storage);
+      } catch (uploadUrlError) {
+        console.warn("[EVIDENT] upload-url request failed — continuing without remote storage:", uploadUrlError);
+      }
+
       pipelineDebugger.uploadCompleted(file.name);
 
       // Step 2: Parse Document
@@ -470,11 +489,8 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         paragraphs: statistics.paragraphs ?? 0,
         readingTime: statistics.readingTime ?? 0,
       });
-      const insights = generateRealInsights(file.name, content.textPages || [], metadata, statistics);
-      
       currentDoc = await DocumentService.update(currentDoc.id, {
         statistics,
-        insights,
         processing: { ...currentDoc.processing, statisticsProgress: 100, insightsProgress: 100, overallProgress: 95 }
       }) || currentDoc;
       validateDocumentState(currentDoc, false);

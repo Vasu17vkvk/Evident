@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Sparkles,
   SendHorizontal,
@@ -8,26 +8,40 @@ import {
   Loader2,
 } from "lucide-react";
 import { useDocument } from "../../hooks/useDocument";
+import { askQuestion, streamQuestion, type ConversationTurn, type MessageStatus, type ChatResponse } from "../../../services/ai/chatService";
+import { SuggestionsService } from "../../services/document/SuggestionsService";
+import { ChatHistoryService, type PersistedMessage } from "../../services/document/ChatHistoryService";
 
-const SUGGESTED_PROMPTS = [
-  "Summarise the document's main point",
-  "What are the core conclusions?",
-  "Find all key figures and mentions",
-  "Give me an overview of page 1",
-];
+
+type ModelTier = "Economy" | "Balanced" | "Advanced";
+
+const MODEL_MAP: Record<ModelTier, { name: string; cost: "Low" | "Medium" | "High" }> = {
+  Economy: { name: "gemini-2.0-flash-lite", cost: "Low" },
+  Balanced: { name: "gemini-2.5-flash", cost: "Medium" },
+  Advanced: { name: "gemini-2.5-pro", cost: "High" },
+};
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  citations?: Array<{ page: number; excerpt: string }>;
+  citations?: Array<{ page: number; excerpt: string; confidence: number }>;
+  timestamp: number; // Unix ms
+  /**
+   * Lifecycle status of assistant messages.
+   * - streaming : tokens arriving, content is partial
+   * - complete  : full response received
+   * - error     : request failed
+   * User messages are always "complete".
+   */
+  status: MessageStatus;
 }
 
 interface Props {
   isOpen?: boolean;
   onClose?: () => void;
   showMessages?: boolean;
-  onCitationClick: (page: number) => void;
+  onCitationClick: (page: number, text?: string) => void;
 }
 
 export function AICopilotPanel({
@@ -39,102 +53,159 @@ export function AICopilotPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  
+  const [selectedTier, setSelectedTier] = useState<ModelTier>(() => {
+    const saved = localStorage.getItem("evident_copilot_model_tier");
+    return (saved as ModelTier) || "Economy";
+  });
 
-  const handleSend = useCallback((textToSend: string) => {
+  const handleModelChange = useCallback((tier: ModelTier) => {
+    setSelectedTier(tier);
+    localStorage.setItem("evident_copilot_model_tier", tier);
+  }, []);
+  // Track the previous document id so we can detect document swaps
+  const prevDocIdRef = useRef<string | undefined>(undefined);
+
+  // Derive context-aware suggestions whenever the document changes
+  const suggestions = useMemo(
+    () => SuggestionsService.getSuggestions(document ?? null),
+    [document]
+  );
+
+  // ── Chat history: load / clear / save ──────────────────────────────────
+
+  // Load history when the document first becomes available
+  useEffect(() => {
+    if (!document?.id) return;
+
+    const docId = document.id;
+
+    if (prevDocIdRef.current === docId) {
+      // Same document — nothing to do (already loaded)
+      return;
+    }
+
+    // Document changed: clear the displayed messages while we load the new history
+    setMessages([]);
+
+    if (prevDocIdRef.current !== undefined) {
+      // Previous document existed — its history was already saved; nothing to clear
+      // (We intentionally keep old history in IDB so the user can reopen it later)
+    }
+
+    prevDocIdRef.current = docId;
+
+    ChatHistoryService.load(docId).then((persisted) => {
+      if (persisted.length === 0) return;
+      // Map PersistedMessage → UI Message (same shape — timestamp already present)
+      setMessages(persisted as Message[]);
+      console.log(`[EVIDENT] Chat history restored: ${persisted.length} messages for doc ${docId}`);
+    });
+  }, [document?.id]);
+
+  // Persist messages to IDB whenever the list changes
+  useEffect(() => {
+    const docId = document?.id;
+    if (!docId || messages.length === 0) return;
+    // Cast is safe: Message is a strict superset of PersistedMessage
+    ChatHistoryService.save(docId, messages as PersistedMessage[]);
+  }, [messages, document?.id]);
+
+  // Auto-scroll to bottom whenever messages or typing indicator change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
+
+  const HISTORY_LIMIT = 10;
+
+  /** Immutably update a single message by id, leaving others intact. */
+  const updateMessageById = useCallback(
+    (id: string, patch: Partial<Message>) =>
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+      ),
+    []
+  );
+
+  const handleSend = useCallback(async (textToSend: string) => {
     const trimmed = textToSend.trim();
-    if (!trimmed) return;
+    if (!trimmed || isTyping) return;
+
+    // Snapshot current messages BEFORE the state update so we can build history
+    const historySnapshot = messages
+      .slice(-HISTORY_LIMIT) // last 10 turns
+      .map((m): ConversationTurn => ({ role: m.role, content: m.content }));
 
     const userMsg: Message = {
       id: Math.random().toString(),
       role: "user",
       content: trimmed,
+      timestamp: Date.now(),
+      status: "complete",
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    // Placeholder assistant message shown immediately with streaming status
+    const assistantId = Math.random().toString();
+    const placeholderMsg: Message = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      status: "streaming",
+    };
+
+    setMessages((prev) => [...prev, userMsg, placeholderMsg]);
     setInput("");
     setIsTyping(true);
 
-    // Dynamic browser-based RAG search engine
-    setTimeout(() => {
-      let content = "";
-      let citations: Message["citations"] = [];
-      const queryLower = trimmed.toLowerCase();
+    const documentText = document?.content?.fullText?.trim() || "No text content available.";
 
-      if (document && document.pagesContent && document.pagesContent.length > 0) {
-        // Tokenize query terms
-        const queryTerms = queryLower.split(/\s+/).filter(w => w.length > 3);
-        let bestPageIdx = 0;
-        let maxMatches = -1;
+    const modelName = MODEL_MAP[selectedTier].name;
 
-        // Perform tf-idf-like frequency analysis across pages
-        for (let p = 0; p < document.pagesContent.length; p++) {
-          const pageText = document.pagesContent[p].toLowerCase();
-          let matches = 0;
-          if (queryTerms.length > 0) {
-            for (const term of queryTerms) {
-              if (pageText.includes(term)) matches++;
-            }
-          } else {
-            if (pageText.includes(queryLower)) matches += 5;
-          }
-          if (matches > maxMatches) {
-            maxMatches = matches;
-            bestPageIdx = p;
-          }
+    await streamQuestion(trimmed, documentText, historySnapshot, {
+      /** Append each token chunk to the placeholder message content */
+      onToken(token: string) {
+        updateMessageById(assistantId, {
+          content: token, // currently receives the full answer in one shot
+          // When real SSE lands, change to: content: (prev.content ?? "") + token
+        });
+      },
+
+      /** Finalise the message: attach citations and mark complete */
+      onComplete(response: ChatResponse) {
+        const citations = (response.citations ?? []).map(
+          (c) => ({
+            page: c.page ?? 1,
+            excerpt: c.text.length > 200 ? c.text.substring(0, 200) + "…" : c.text,
+            confidence: c.confidence ?? 1,
+          })
+        );
+        updateMessageById(assistantId, {
+          content: response.answer,
+          citations,
+          status: "complete",
+        });
+        setIsTyping(false);
+      },
+
+      /** Mark the placeholder as errored */
+      onError(err: any) {
+        console.error("[EVIDENT] chat API error:", err);
+        let errorText = "Failed to contact AI Copilot.";
+        if (err?.response?.data?.detail) {
+          errorText = err.response.data.detail;
+        } else if (err?.message) {
+          errorText = `Error: ${err.message}`;
         }
-
-        // Isolate the best paragraph on the chosen page
-        const bestPageText = document.pagesContent[bestPageIdx];
-        const paragraphs = bestPageText.split(/(?:\n\s*){2,}/).flatMap(p => p.split("\n")).filter(p => p.trim().length > 15);
-        let bestParagraph = paragraphs[0] || bestPageText;
-
-        if (queryTerms.length > 0) {
-          let maxParaMatches = -1;
-          for (const para of paragraphs) {
-            let paraMatches = 0;
-            const paraLower = para.toLowerCase();
-            for (const term of queryTerms) {
-              if (paraLower.includes(term)) paraMatches++;
-            }
-            if (paraMatches > maxParaMatches) {
-              maxParaMatches = paraMatches;
-              bestParagraph = para;
-            }
-          }
-        }
-
-        const pageNum = bestPageIdx + 1;
-        const cleanPara = bestParagraph.replace(/\[\d+\]/g, "").trim();
-
-        // Formulate response dynamically
-        if (queryLower.includes("summary") || queryLower.includes("summarise") || queryLower.includes("overview")) {
-          content = `Here is a summary based on the contents of page ${pageNum}:\n\n"${cleanPara}"`;
-        } else if (queryLower.includes("who") || queryLower.includes("author") || queryLower.includes("person") || queryLower.includes("people")) {
-          content = `According to page ${pageNum}, the document notes:\n\n"${cleanPara}"`;
-        } else if (queryLower.includes("conclusion") || queryLower.includes("conclude") || queryLower.includes("finally")) {
-          content = `Based on the text on page ${pageNum}, the core findings note:\n\n"${cleanPara}"`;
-        } else {
-          content = `Based on page ${pageNum} of the document, the text notes:\n\n"${cleanPara}"`;
-        }
-
-        citations = [
-          { page: pageNum, excerpt: cleanPara.substring(0, 70) + "..." }
-        ];
-      } else {
-        content = "No document is currently active in the workspace session. Please upload a file to analyze its content.";
-      }
-
-      const aiMsg: Message = {
-        id: Math.random().toString(),
-        role: "assistant",
-        content,
-        citations,
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsTyping(false);
-    }, 1000);
-  }, [document]);
+        updateMessageById(assistantId, {
+          content: errorText,
+          status: "error",
+        });
+        setIsTyping(false);
+      },
+    }, modelName);
+  }, [document, isTyping, messages, updateMessageById, selectedTier]);
 
   return (
     <>
@@ -180,9 +251,9 @@ export function AICopilotPanel({
                 Every answer includes direct citations linked to the source page.
               </p>
 
-              {/* Suggested prompts */}
+              {/* Suggested prompts — empty state */}
               <div className="flex w-full flex-col gap-2">
-                {SUGGESTED_PROMPTS.map((prompt) => (
+                {suggestions.map((prompt) => (
                   <button
                     key={prompt}
                     type="button"
@@ -211,7 +282,7 @@ export function AICopilotPanel({
                     <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/50">
                       {msg.role === "user" ? "You" : "Copilot"}
                     </span>
-                    {msg.role === "assistant" && (
+                    {msg.role === "assistant" && msg.status === "complete" && (
                       <button 
                         type="button"
                         onClick={() => navigator.clipboard.writeText(msg.content)}
@@ -222,35 +293,52 @@ export function AICopilotPanel({
                     )}
                   </div>
 
-                  {/* Content */}
+                  {/* Content + streaming cursor */}
                   <p className="text-[12px] leading-relaxed text-foreground whitespace-pre-wrap select-text">
                     {msg.content}
+                    {msg.status === "streaming" && (
+                      <span
+                        aria-hidden="true"
+                        className="ml-0.5 inline-block h-3 w-0.5 bg-[#ff3d00] align-middle animate-pulse"
+                      />
+                    )}
                   </p>
 
-                  {/* Citations */}
-                  {msg.citations && msg.citations.length > 0 && (
+                  {/* Citations — only shown once the response is complete */}
+                  {msg.status === "complete" && msg.citations && msg.citations.length > 0 && (
                     <div className="mt-4">
                       <p className="mb-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/40">
                         Sources
                       </p>
-                      <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-col gap-2">
                         {msg.citations.map((c, i) => (
                           <button
                             key={i}
                             type="button"
-                            onClick={() => onCitationClick(c.page)}
-                            className="flex items-center gap-2 border border-border bg-secondary px-3 py-2 text-left hover:border-[#ff3d00]/30 transition-colors"
+                            onClick={() => onCitationClick(c.page, c.excerpt)}
+                            className="group flex flex-col gap-2 rounded border border-border bg-card px-3 py-3 text-left hover:border-[#ff3d00]/40 transition-colors"
                           >
-                            <span className="font-mono text-[9px] text-[#ff3d00] shrink-0">
-                              p.{c.page}
-                            </span>
-                            <span className="flex-1 truncate font-mono text-[9px] text-muted-foreground">
-                              {c.excerpt}
-                            </span>
-                            <ChevronRight
-                              className="size-2.5 shrink-0 text-muted-foreground/30"
-                              strokeWidth={1.5}
-                            />
+                            {/* Header row: page + confidence */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[9px] font-semibold text-[#ff3d00]">
+                                  Page {c.page}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="font-mono text-[9px] text-muted-foreground/60">
+                                  {Math.round(c.confidence * 100)}% confidence
+                                </span>
+                                <ChevronRight
+                                  className="size-2.5 text-muted-foreground/30 group-hover:text-[#ff3d00]/50 transition-colors"
+                                  strokeWidth={1.5}
+                                />
+                              </div>
+                            </div>
+                            {/* Quoted excerpt */}
+                            <p className="font-mono text-[10px] leading-relaxed text-muted-foreground line-clamp-3">
+                              &ldquo;{c.excerpt}&rdquo;
+                            </p>
                           </button>
                         ))}
                       </div>
@@ -268,15 +356,19 @@ export function AICopilotPanel({
                   </span>
                 </div>
               )}
+              {/* Scroll anchor */}
+              <div ref={bottomRef} />
             </div>
           )}
         </div>
 
+
+
         {/* ── Input area ───────────────────────────── */}
-        <div className="shrink-0 border-t border-border p-4">
-          <div className="flex items-end gap-3 border border-border bg-secondary px-4 py-3 focus-within:border-[#ff3d00]/40 transition-colors">
+        <div className="shrink-0 border-t border-border p-3">
+          <div className="flex items-center gap-2 border border-border bg-secondary pl-3 pr-2 py-1.5 focus-within:border-[#ff3d00]/40 transition-colors">
             <textarea
-              rows={2}
+              rows={1}
               placeholder="Ask a question about this document…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -286,17 +378,37 @@ export function AICopilotPanel({
                   handleSend(input);
                 }
               }}
-              className="flex-1 resize-none bg-transparent text-[12px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+              disabled={isTyping}
+              className="flex-1 resize-none bg-transparent text-[12px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed align-middle py-0.5"
             />
+            
+            {/* Model Dropdown */}
+            <div className="shrink-0 flex items-center bg-background border border-border rounded-sm h-7 w-[85px] lg:w-[110px]">
+              <select
+                value={selectedTier}
+                onChange={(e) => handleModelChange(e.target.value as ModelTier)}
+                className="bg-transparent font-mono text-[8px] uppercase tracking-wider text-foreground focus:outline-none cursor-pointer w-full pl-1.5 pr-1"
+              >
+                <option value="Economy" className="bg-popover text-foreground">Economy</option>
+                <option value="Balanced" className="bg-popover text-foreground">Balanced</option>
+                <option value="Advanced" className="bg-popover text-foreground">Advanced</option>
+              </select>
+            </div>
+
+            {/* Send Button */}
             <button 
               type="button"
               onClick={() => handleSend(input)}
-              className="flex size-7 shrink-0 items-center justify-center bg-[#ff3d00] text-primary-foreground hover:bg-[#ff3d00]/80 transition-colors"
+              disabled={isTyping}
+              aria-label={isTyping ? "Waiting for response" : "Send message"}
+              className="flex size-7 shrink-0 items-center justify-center bg-[#ff3d00] text-primary-foreground hover:bg-[#ff3d00]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <SendHorizontal className="size-3.5" strokeWidth={1.5} />
+              {isTyping
+                ? <Loader2 className="size-3.5 animate-spin" strokeWidth={1.5} />
+                : <SendHorizontal className="size-3.5" strokeWidth={1.5} />}
             </button>
           </div>
-          <p className="mt-2 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground/30">
+          <p className="mt-1.5 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground/30">
             Shift+Enter for new line · Enter to send
           </p>
         </div>

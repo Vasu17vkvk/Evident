@@ -63,6 +63,54 @@ export function PDFViewer({
       });
   }, [url]);
 
+  const [pageWidth, setPageWidth] = useState<number | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+
+  const updateDimensions = useCallback(() => {
+    if (scrollContainerRef.current) {
+      const width = scrollContainerRef.current.clientWidth - 48; // p-6 is 24px padding on each side
+      setContainerWidth(width > 0 ? width : window.innerWidth - 48);
+    } else {
+      setContainerWidth(window.innerWidth - 48);
+    }
+  }, []);
+
+  // Fetch page width of the first page to compute scale
+  useEffect(() => {
+    if (pdf) {
+      pdf.getPage(1).then((page: any) => {
+        const viewport = page.getViewport({ scale: 1 });
+        setPageWidth(viewport.width);
+      }).catch((e: any) => {
+        console.error("Error getting page width:", e);
+      });
+    }
+  }, [pdf]);
+
+  // Event listener for window resize and orientation changes
+  useEffect(() => {
+    updateDimensions();
+    window.addEventListener("resize", updateDimensions);
+    window.addEventListener("orientationchange", updateDimensions);
+    return () => {
+      window.removeEventListener("resize", updateDimensions);
+      window.removeEventListener("orientationchange", updateDimensions);
+    };
+  }, [updateDimensions, pdf]);
+
+  // Re-run dimension updates when pageWidth changes
+  useEffect(() => {
+    const timer = setTimeout(updateDimensions, 100);
+    return () => clearTimeout(timer);
+  }, [pageWidth, updateDimensions]);
+
+  const isMobile = window.innerWidth < 768;
+  const mobileFitScale = (isMobile && pageWidth && containerWidth)
+    ? (containerWidth / pageWidth)
+    : 1;
+
+  const actualScale = scale * mobileFitScale;
+
   // Scroll to active match when activeIndex or searchResults changes
   useEffect(() => {
     if (activeIndex !== null && searchResults && searchResults.length > 0) {
@@ -167,7 +215,7 @@ export function PDFViewer({
             <PDFPage
               pdf={pdf}
               pageNumber={pNum}
-              scale={scale}
+              scale={actualScale}
               rotation={rotation}
               searchQuery={searchQuery}
               searchResults={searchResults}

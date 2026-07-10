@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   BarChart3,
   X,
@@ -13,6 +13,7 @@ import {
   Zap,
   Calendar,
   Check,
+  Loader2,
 } from "lucide-react";
 import {
   BarChart,
@@ -27,6 +28,7 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../ui/chart";
 import { useDocument } from "../../hooks/useDocument";
+import { generateRealInsights } from "../../context/DocumentContext";
 import { DocumentInsights } from "../../types/document";
 
 interface Props {
@@ -108,10 +110,10 @@ function FactItem({ fact }: { fact: any }) {
           <div className="flex size-7 items-center justify-center bg-secondary border border-border rounded-sm">
             <Icon className="size-3.5 text-[#ff3d00]" />
           </div>
-          <div className="flex flex-col">
-            <span className="text-[11px] text-foreground font-medium">{fact.label}</span>
-            <span className="text-[10px] text-muted-foreground">{fact.change}</span>
-          </div>
+            <div className="flex flex-col">
+              <span className="text-[11px] text-foreground font-medium">{fact.label}</span>
+              <span style={{ textAlign: "justify", lineHeight: 1.8, letterSpacing: "0.01em", marginBottom: "16px", display: "block" }} className="text-[10px] text-muted-foreground">{fact.change}</span>
+            </div>
         </div>
         <div className="font-mono text-[13px] text-foreground">{fact.value}</div>
       </div>
@@ -147,7 +149,7 @@ function TimelineItem({ item }: { item: DocumentInsights['timeline'][0] }) {
           </Badge>
         </div>
         <span className="text-[11px] text-foreground font-medium">{item.title}</span>
-        <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{item.description}</p>
+        <p style={{ textAlign: "justify", lineHeight: 1.8, letterSpacing: "0.01em", marginBottom: "16px" }} className="text-[10px] text-muted-foreground mt-1">{item.description}</p>
       </div>
     </div>
   );
@@ -160,7 +162,76 @@ export function InsightsPanel({
   const [activeTab, setActiveTab] = useState<TabName>("Summary");
   const scrollPositions = useRef<Record<string, number>>({});
   const contentRef = useRef<HTMLDivElement>(null);
-  const { document } = useDocument();
+  const { document, updateDocument } = useDocument();
+  const [generatingTabs, setGeneratingTabs] = useState<Record<string, boolean>>({});
+
+  const isTabGenerated = useCallback((tab: TabName): boolean => {
+    if (!document) return false;
+    const insights = document.insights;
+    if (!insights) return false;
+
+    if (tab === "Summary") {
+      return !!insights.executiveSummary;
+    }
+    if (tab === "Facts") {
+      return !!insights.facts && insights.facts.length > 0;
+    }
+    if (tab === "Entities") {
+      return !!insights.entities && (
+        (insights.entities.people && insights.entities.people.length > 0) ||
+        (insights.entities.organizations && insights.entities.organizations.length > 0) ||
+        (insights.entities.locations && insights.entities.locations.length > 0)
+      );
+    }
+    if (tab === "Timeline") {
+      return !!insights.timeline && insights.timeline.length > 0;
+    }
+    if (tab === "Metrics") {
+      return true;
+    }
+    return false;
+  }, [document]);
+
+  const triggerGeneration = useCallback(async (tab: TabName) => {
+    if (!document) return;
+
+    setGeneratingTabs(prev => ({ ...prev, [tab]: true }));
+
+    // Simulate AI generation delay
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    const fullRealInsights = generateRealInsights(
+      document.name,
+      document.pagesContent || [],
+      document.metadata,
+      document.statistics
+    );
+
+    const currentInsights = document.insights || {};
+    let updatedInsights = { ...currentInsights };
+
+    if (tab === "Summary") {
+      updatedInsights.executiveSummary = fullRealInsights.executiveSummary;
+      updatedInsights.documentPurpose = fullRealInsights.documentPurpose;
+      updatedInsights.keyTopics = fullRealInsights.keyTopics;
+      updatedInsights.readingTime = fullRealInsights.readingTime;
+    } else if (tab === "Facts") {
+      updatedInsights.facts = fullRealInsights.facts;
+    } else if (tab === "Entities") {
+      updatedInsights.entities = fullRealInsights.entities;
+    } else if (tab === "Timeline") {
+      updatedInsights.timeline = fullRealInsights.timeline;
+    }
+
+    await updateDocument({ insights: updatedInsights });
+    setGeneratingTabs(prev => ({ ...prev, [tab]: false }));
+  }, [document, updateDocument]);
+
+  useEffect(() => {
+    if (isOpen && activeTab !== "Metrics" && !isTabGenerated(activeTab) && !generatingTabs[activeTab]) {
+      triggerGeneration(activeTab);
+    }
+  }, [isOpen, activeTab, isTabGenerated, generatingTabs, triggerGeneration]);
 
   const insights = document?.insights || {
     executiveSummary: "",
@@ -271,12 +342,19 @@ export function InsightsPanel({
               `}
               style={{ display: activeTab === tab ? "block" : "none" }}
             >
-              {tab === "Summary" ? (
+              {generatingTabs[tab] || (!isTabGenerated(tab) && tab !== "Metrics") ? (
+                <div className="flex h-[200px] flex-col items-center justify-center gap-3">
+                  <Loader2 className="size-5 text-[#ff3d00] animate-spin" strokeWidth={1.5} />
+                  <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground animate-pulse">
+                    Generating insights…
+                  </span>
+                </div>
+              ) : tab === "Summary" ? (
                 <>
                   {/* Executive Summary */}
                   <SummarySection title="Executive Summary" icon={FileText}>
                     <Card className="p-4 bg-card border border-border rounded-sm gap-3">
-                      <p className="text-[11px] leading-relaxed text-foreground">
+                      <p style={{ textAlign: "justify", lineHeight: 1.8, letterSpacing: "0.01em", marginBottom: "16px" }} className="text-[11px] text-foreground">
                         {insights.executiveSummary}
                       </p>
                     </Card>
@@ -285,7 +363,7 @@ export function InsightsPanel({
                   {/* Document Purpose */}
                   <SummarySection title="Document Purpose" icon={Target}>
                     <Card className="p-4 bg-card border border-border rounded-sm gap-3">
-                      <p className="text-[11px] leading-relaxed text-foreground">
+                      <p style={{ textAlign: "justify", lineHeight: 1.8, letterSpacing: "0.01em", marginBottom: "16px" }} className="text-[11px] text-foreground">
                         {insights.documentPurpose}
                       </p>
                     </Card>

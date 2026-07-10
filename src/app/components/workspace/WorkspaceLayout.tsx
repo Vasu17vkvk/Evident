@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { FileText, MessageSquare, BarChart3, FolderOpen } from "lucide-react";
+import { FileText, MessageSquare, BarChart3, FolderOpen, Settings as SettingsIcon } from "lucide-react";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { DocumentViewer } from "./DocumentViewer";
 import { AICopilotPanel } from "./AICopilotPanel";
 import { InsightsPanel } from "./InsightsPanel";
+import { Account } from "../sections/Account";
 import { useDocument } from "../../hooks/useDocument";
 import { SearchService, SearchResult } from "../../services/document/SearchService";
 
-type MobileTab = "document" | "copilot" | "insights" | "files";
+type MobileTab = "document" | "copilot" | "insights" | "files" | "settings";
 
 interface Props {
   documentName?: string;
@@ -39,6 +40,8 @@ export function WorkspaceLayout({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Timer ref to clear transient citation search query after highlight
+  const citationSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Emergency fallback: if doc isn't Ready for too long, disable AI/Insights/Search.
   const emergencyFallback = !!(document && document.status !== "Ready");
@@ -100,11 +103,21 @@ export function WorkspaceLayout({
     { id: "document", label: "Document", icon: FileText },
     { id: "copilot", label: "Copilot", icon: MessageSquare },
     { id: "insights", label: "Insights", icon: BarChart3 },
-    { id: "files", label: "Files", icon: FolderOpen },
+    { id: "settings", label: "Settings", icon: SettingsIcon },
   ];
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <style>{`
+        :root {
+          --navbar-height: 64px;
+        }
+        @media (min-width: 640px) {
+          :root {
+            --navbar-height: 72px;
+          }
+        }
+      `}</style>
         <WorkspaceHeader
           documentName={displayDocumentName}
           userName={userName}
@@ -167,10 +180,21 @@ export function WorkspaceLayout({
             isOpen={copilotOpen && !emergencyFallback}
             onClose={() => setCopilotOpen(false)}
             showMessages={showMessages}
-            onCitationClick={(page) => {
+            onCitationClick={(page, text) => {
               if (emergencyFallback) return;
+              // Navigate to page
               setCurrentPage(page);
+              // Switch to text view so highlights are visible for all formats
               setCurrentView("text");
+              // Inject citation text into search pipeline to trigger highlight
+              if (text) {
+                // Use first 60 chars — enough for a specific match, short enough to find reliably
+                const query = text.substring(0, 60).trim();
+                setSearchQuery(query);
+                // Clear after 4 s so the search bar doesn't stay polluted
+                if (citationSearchTimeoutRef.current) clearTimeout(citationSearchTimeoutRef.current);
+                citationSearchTimeoutRef.current = setTimeout(() => setSearchQuery(""), 4000);
+              }
             }}
           />
           <InsightsPanel
@@ -181,7 +205,12 @@ export function WorkspaceLayout({
       </div>
 
       {/* ── Mobile layout: tabbed panels ── */}
-      <div className="flex lg:hidden flex-1 flex-col overflow-hidden">
+      <div 
+        className="flex lg:hidden flex-1 flex-col overflow-hidden"
+        style={{
+          paddingBottom: "calc(var(--navbar-height) + env(safe-area-inset-bottom))",
+        }}
+      >
         {/* Mobile sidebar drawer (over content) */}
         <WorkspaceSidebar
           isOpen={mobileTab === "files" || sidebarOpen}
@@ -212,10 +241,16 @@ export function WorkspaceLayout({
                 isOpen={true}
                 onClose={() => setMobileTab("document")}
                 showMessages={showMessages}
-                onCitationClick={(page) => {
+                onCitationClick={(page, text) => {
                   setCurrentPage(page);
                   setCurrentView("text");
                   setMobileTab("document");
+                  if (text) {
+                    const query = text.substring(0, 60).trim();
+                    setSearchQuery(query);
+                    if (citationSearchTimeoutRef.current) clearTimeout(citationSearchTimeoutRef.current);
+                    citationSearchTimeoutRef.current = setTimeout(() => setSearchQuery(""), 4000);
+                  }
                 }}
               />
             </div>
@@ -241,11 +276,21 @@ export function WorkspaceLayout({
               searchResults={searchResults}
               activeIndex={activeIndex}
             />
+          {mobileTab === "settings" && (
+            <div className="flex flex-col h-full overflow-y-auto">
+              <Account />
+            </div>
           )}
         </div>
 
         {/* ── Mobile bottom tab bar ── */}
-        <nav className="shrink-0 border-t border-border bg-background flex items-stretch pb-safe">
+        <nav 
+          className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background flex items-stretch"
+          style={{
+            paddingBottom: "env(safe-area-inset-bottom)",
+            height: "calc(var(--navbar-height) + env(safe-area-inset-bottom))",
+          }}
+        >
           {mobileTabs.map(({ id, label, icon: Icon }) => {
             const isActive = mobileTab === id;
             return (
