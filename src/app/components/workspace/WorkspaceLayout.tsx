@@ -276,6 +276,7 @@ export function WorkspaceLayout({
               searchResults={searchResults}
               activeIndex={activeIndex}
             />
+          )}
           {mobileTab === "settings" && (
             <div className="flex flex-col h-full overflow-y-auto">
               <Account />
