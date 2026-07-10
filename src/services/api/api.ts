@@ -1,4 +1,5 @@
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_API_URL ||
+  "https://evident-0e7j.onrender.com";
 
 export interface UploadUrlRequest {
   filename: string;
@@ -12,13 +13,13 @@ export interface UploadUrlResponse {
 }
 
 export const healthCheck = async () => {
-    const response = await fetch(`${API_BASE_URL}/health`);
+  const response = await fetch(`${API_BASE_URL}/health`);
 
-    if (!response.ok) {
-        throw new Error("Backend unavailable");
-    }
+  if (!response.ok) {
+    throw new Error("Backend unavailable");
+  }
 
-    return response.json();
+  return response.json();
 };
 
 export const requestUploadUrl = async (
