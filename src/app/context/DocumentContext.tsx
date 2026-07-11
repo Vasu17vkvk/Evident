@@ -415,16 +415,30 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         });
         console.log("[S3] Upload URL received");
 
+        let uploadHostname = "";
+        try {
+          uploadHostname = new URL(uploadUrlResponse.uploadUrl).hostname;
+        } catch (e) {
+          uploadHostname = "Invalid URL";
+        }
+
+        const requestHeaders = {};
+
+        console.log(`[S3] file.type: ${file.type}`);
+        console.log(`[S3] Signed Content-Type: ${uploadUrlResponse.contentType || file.type}`);
+        console.log("[S3] Upload request headers:", requestHeaders);
+        console.log(`[S3] Upload URL hostname: ${uploadHostname}`);
+
         console.log("[S3] Uploading file...");
         const s3PutResponse = await fetch(uploadUrlResponse.uploadUrl, {
           method: "PUT",
-          headers: {
-            "Content-Type": file.type,
-          },
+          headers: requestHeaders,
           body: file,
         });
 
         if (!s3PutResponse.ok) {
+          const errorText = await s3PutResponse.text();
+          console.error("[S3] S3 error response:", errorText);
           throw new Error(`S3 PUT failed with status: ${s3PutResponse.status} ${s3PutResponse.statusText}`);
         }
 

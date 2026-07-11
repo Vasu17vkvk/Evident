@@ -10,6 +10,7 @@ export interface UploadUrlResponse {
   uploadUrl: string;
   objectKey: string;
   fileUrl: string;
+  contentType?: string;
 }
 
 export const healthCheck = async () => {
