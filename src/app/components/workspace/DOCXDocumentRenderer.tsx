@@ -132,7 +132,7 @@ export function DOCXDocumentRenderer({
 
               <div className="flex-1 flex flex-col justify-start select-text">
                 <div
-                  className="text-[12px] leading-relaxed text-foreground select-text [&_p]:mb-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:mb-1 [&_strong]:font-bold [&_em]:italic [&_b]:font-bold [&_i]:italic [&_br]:mb-2"
+                  className="text-sm sm:text-base leading-relaxed text-foreground select-text [&_p]:mb-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:mb-1 [&_strong]:font-bold [&_em]:italic [&_b]:font-bold [&_i]:italic [&_br]:mb-2"
                   dangerouslySetInnerHTML={{ __html: highlightedHtml }}
                 />
               </div>

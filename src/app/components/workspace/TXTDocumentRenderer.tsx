@@ -131,7 +131,7 @@ export function TXTDocumentRenderer({
               </div>
 
               <div className="flex-1 flex flex-col justify-start select-text">
-                <p className="text-[12px] leading-relaxed text-foreground whitespace-pre-wrap select-text">
+                <p className="text-sm sm:text-base leading-relaxed text-foreground whitespace-pre-wrap select-text">
                   {segments.map((seg, sIdx) => {
                     if (seg.isMatch) {
                       return (

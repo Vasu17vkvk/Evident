@@ -266,7 +266,7 @@ export function Hero() {
                 <input
                   ref={inputRef}
                   type="file"
-                  accept=".pdf,.docx,.txt"
+                  accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                   className="sr-only"
                   onChange={handleFileChange}
                   disabled={isBusy}

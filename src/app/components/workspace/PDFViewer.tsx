@@ -267,14 +267,18 @@ function PDFPage({
         renderTaskRef.current.cancel();
       }
 
+      const dpr = window.devicePixelRatio || 1;
       const viewport = page.getViewport({ scale, rotation });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      
       setViewportSize({ width: viewport.width, height: viewport.height });
 
       const renderContext = {
         canvasContext: context,
         viewport: viewport,
+        transform: [dpr, 0, 0, dpr, 0, 0],
       };
 
       const renderTask = page.render(renderContext);
@@ -354,6 +358,10 @@ function PDFPage({
       <canvas
         ref={canvasRef}
         className="shadow-lg max-w-full bg-[#fafafa]"
+        style={{
+          width: viewportSize.width ? `${viewportSize.width}px` : "auto",
+          height: viewportSize.height ? `${viewportSize.height}px` : "auto",
+        }}
       />
       {/* Absolute search highlight divs */}
       {highlights.map((h, i) => (
