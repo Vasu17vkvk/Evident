@@ -406,22 +406,52 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       setDocument(currentDoc);
       localStorage.setItem("activeDocumentId", currentDoc.id);
 
-      // Step 1b: Request a remote upload URL (non-blocking — never fails the pipeline)
+      // Step 1b: Request S3 presigned URL and upload file (non-blocking fallback to local flow)
       try {
+        console.log("[S3] Requesting upload URL...");
         const uploadUrlResponse = await requestUploadUrl({
           filename: file.name,
           contentType: file.type,
         });
+        console.log("[S3] Upload URL received");
+
+        console.log("[S3] Uploading file...");
+        const s3PutResponse = await fetch(uploadUrlResponse.uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": file.type,
+          },
+          body: file,
+        });
+
+        if (!s3PutResponse.ok) {
+          throw new Error(`S3 PUT failed with status: ${s3PutResponse.status} ${s3PutResponse.statusText}`);
+        }
+
+        console.log("[S3] Upload complete");
+        console.log(`[S3] File URL: ${uploadUrlResponse.fileUrl}`);
+
         const storage = {
           objectKey: uploadUrlResponse.objectKey,
           fileUrl: uploadUrlResponse.fileUrl,
-          provider: "mock" as const,
+          provider: "s3" as const,
         };
         currentDoc = await DocumentService.update(currentDoc.id, { storage }) || currentDoc;
         setDocument(currentDoc);
-        console.log("[EVIDENT] upload-url acquired:", storage);
-      } catch (uploadUrlError) {
-        console.warn("[EVIDENT] upload-url request failed — continuing without remote storage:", uploadUrlError);
+      } catch (s3Error) {
+        console.warn("[S3] S3 upload failed — falling back to local flow:", s3Error);
+        // Fallback to local upload / mock storage flow to keep pipeline moving
+        try {
+          const fallbackStorage = {
+            objectKey: `uploads/fallback-${Date.now()}/${file.name}`,
+            fileUrl: URL.createObjectURL(file),
+            provider: "mock" as const,
+          };
+          currentDoc = await DocumentService.update(currentDoc.id, { storage: fallbackStorage }) || currentDoc;
+          setDocument(currentDoc);
+        } catch (fallbackError) {
+          console.warn("[EVIDENT] Fallback local storage registration failed:", fallbackError);
+        }
       }
 
       pipelineDebugger.uploadCompleted(file.name);
