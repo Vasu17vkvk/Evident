@@ -44,3 +44,18 @@ def generate_upload_url(filename: str, content_type: str):
         "fileUrl": file_url,
         "contentType": content_type
     }
+
+
+def delete_file(object_key: str) -> bool:
+    """
+    Remove an object from the S3 bucket.
+    """
+    try:
+        s3.delete_object(
+            Bucket=BUCKET_NAME,
+            Key=object_key
+        )
+        return True
+    except Exception as e:
+        print(f"[S3] Error deleting object {object_key}: {e}")
+        raise e

@@ -30,6 +30,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../ui/chart";
 import { useDocument } from "../../hooks/useDocument";
 import { generateRealInsights } from "../../context/DocumentContext";
 import { DocumentInsights } from "../../types/document";
+import { fetchInsights } from "../../../services/api/api";
 
 interface Props {
   isOpen?: boolean;
@@ -197,33 +198,71 @@ export function InsightsPanel({
 
     setGeneratingTabs(prev => ({ ...prev, [tab]: true }));
 
-    // Simulate AI generation delay
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // @ts-ignore
+    const mongoDbId = document.mongoDbId;
+    if (mongoDbId) {
+      try {
+        console.log("[Insights] Fetching/generating real AI insights from backend for ID:", mongoDbId);
+        const realInsights = await fetchInsights(mongoDbId);
+        
+        // Map from backend InsightsResponse to frontend DocumentInsights structure
+        const mappedInsights: DocumentInsights = {
+          executiveSummary: realInsights.executiveSummary,
+          documentPurpose: realInsights.documentPurpose,
+          readingTime: document.metadata?.estimatedReadingTime ? `${document.metadata.estimatedReadingTime} min` : "0 min",
+          tone: "Professional",
+          facts: realInsights.facts || [],
+          entities: {
+            people: realInsights.entities?.people || [],
+            organizations: realInsights.entities?.organizations || [],
+            locations: realInsights.entities?.locations || []
+          },
+          timeline: realInsights.timeline || [],
+          keyTopics: [],
+          statistics: []
+        };
 
-    const fullRealInsights = generateRealInsights(
-      document.name,
-      document.pagesContent || [],
-      document.metadata,
-      document.statistics
-    );
+        await updateDocument({ insights: mappedInsights });
+      } catch (err) {
+        console.error("[Insights] Backend insights generation failed, falling back to client-side heuristics:", err);
+        // Fallback to client-side heuristics
+        const fullRealInsights = generateRealInsights(
+          document.name,
+          document.pagesContent || [],
+          document.metadata,
+          document.statistics
+        );
+        await updateDocument({ insights: fullRealInsights });
+      }
+    } else {
+      // Fallback to client-side heuristics when mongoDbId is missing
+      console.log("[Insights] Document not persisted in MongoDB. Using client-side heuristics.");
+      const fullRealInsights = generateRealInsights(
+        document.name,
+        document.pagesContent || [],
+        document.metadata,
+        document.statistics
+      );
 
-    const currentInsights = document.insights || {};
-    let updatedInsights = { ...currentInsights };
+      const currentInsights = document.insights || {};
+      let updatedInsights = { ...currentInsights };
 
-    if (tab === "Summary") {
-      updatedInsights.executiveSummary = fullRealInsights.executiveSummary;
-      updatedInsights.documentPurpose = fullRealInsights.documentPurpose;
-      updatedInsights.keyTopics = fullRealInsights.keyTopics;
-      updatedInsights.readingTime = fullRealInsights.readingTime;
-    } else if (tab === "Facts") {
-      updatedInsights.facts = fullRealInsights.facts;
-    } else if (tab === "Entities") {
-      updatedInsights.entities = fullRealInsights.entities;
-    } else if (tab === "Timeline") {
-      updatedInsights.timeline = fullRealInsights.timeline;
+      if (tab === "Summary") {
+        updatedInsights.executiveSummary = fullRealInsights.executiveSummary;
+        updatedInsights.documentPurpose = fullRealInsights.documentPurpose;
+        updatedInsights.keyTopics = fullRealInsights.keyTopics;
+        updatedInsights.readingTime = fullRealInsights.readingTime;
+      } else if (tab === "Facts") {
+        updatedInsights.facts = fullRealInsights.facts;
+      } else if (tab === "Entities") {
+        updatedInsights.entities = fullRealInsights.entities;
+      } else if (tab === "Timeline") {
+        updatedInsights.timeline = fullRealInsights.timeline;
+      }
+
+      await updateDocument({ insights: updatedInsights });
     }
 
-    await updateDocument({ insights: updatedInsights });
     setGeneratingTabs(prev => ({ ...prev, [tab]: false }));
   }, [document, updateDocument]);
 

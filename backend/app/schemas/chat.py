@@ -66,3 +66,24 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
 
+
+# ---------------------------------------------------------------------------
+# Persistent Chat Schemas
+# ---------------------------------------------------------------------------
+
+from datetime import datetime
+
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    timestamp: datetime
+    model: str | None = None
+    tokenUsage: int | None = 0
+
+class PersistedChatRequest(BaseModel):
+    question: str
+    documentText: str
+    model: str | None = None
+    conversationHistory: list[ConversationTurn] = []
+
+

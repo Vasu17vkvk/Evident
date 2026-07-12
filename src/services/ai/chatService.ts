@@ -1,4 +1,4 @@
-import axios from "axios";
+import { api } from "../api/api";
 
 const API_URL = import.meta.env.VITE_API_URL ||
     "https://evident-0e7j.onrender.com";
@@ -53,10 +53,13 @@ export const askQuestion = async (
     question: string,
     documentText: string,
     conversationHistory: ConversationTurn[] = [],
-    model?: string
+    model?: string,
+    documentId?: string
 ): Promise<ChatResponse> => {
-    const response = await axios.post(
-        `${API_URL}/chat`,
+    const url = documentId ? `/chat/${documentId}` : `/chat`;
+    
+    const response = await api.post(
+        url,
         {
             question,
             documentText,
@@ -82,10 +85,11 @@ export const streamQuestion = async (
     documentText: string,
     conversationHistory: ConversationTurn[] = [],
     callbacks: ChatStreamCallbacks,
-    model?: string
+    model?: string,
+    documentId?: string
 ): Promise<void> => {
     try {
-        const response = await askQuestion(question, documentText, conversationHistory, model);
+        const response = await askQuestion(question, documentText, conversationHistory, model, documentId);
 
         // Simulate token delivery so the streaming path is exercised end-to-end.
         // Replace this block with real token events when SSE is available.

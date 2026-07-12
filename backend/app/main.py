@@ -1,11 +1,25 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import upload_router, chat_router
+from app.api import upload_router, chat_router, documents_router, insights_router, auth_router
+from app.database.mongodb import connect_to_mongo, close_mongo_connection
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Connect to MongoDB
+    import os
+    print("Frontend Project (Configured): evident-ai-4a031")
+    print("Backend Project (FIREBASE_PROJECT_ID):", os.getenv("FIREBASE_PROJECT_ID"))
+    await connect_to_mongo()
+    yield
+    # Shutdown: Close database connection
+    await close_mongo_connection()
 
 app = FastAPI(
     title="Evident API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 origins = [
@@ -27,6 +41,9 @@ app.add_middleware(
 
 app.include_router(upload_router)
 app.include_router(chat_router)
+app.include_router(documents_router)
+app.include_router(insights_router)
+app.include_router(auth_router)
 
 @app.get("/")
 async def root():

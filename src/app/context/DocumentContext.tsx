@@ -19,7 +19,7 @@ import { MetadataService } from "../services/document/metadataService";
 import { StatisticsService } from "../services/document/statisticsService";
 import { DocumentValidatorService } from "../services/document/documentValidatorService";
 import { pipelineDebugger } from "../services/debug/pipelineDebugger";
-import { requestUploadUrl } from "../../services/api/api";
+import { requestUploadUrl, persistDocument, updatePersistedDocument } from "../../services/api/api";
 
 // Timeout duration for processing states (15 seconds)
 const PROCESSING_TIMEOUT_MS = 15000;
@@ -452,6 +452,28 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         };
         currentDoc = await DocumentService.update(currentDoc.id, { storage }) || currentDoc;
         setDocument(currentDoc);
+
+        // Persist S3 document details to MongoDB
+        try {
+          const persistRes = await persistDocument({
+            filename: file.name,
+            objectKey: uploadUrlResponse.objectKey,
+            fileUrl: uploadUrlResponse.fileUrl,
+            mimeType: file.type,
+            fileSize: file.size,
+            pages: 0,
+            wordCount: 0,
+            status: "Uploaded",
+          });
+          console.log("[S3] Document metadata persisted in MongoDB with ID:", persistRes.documentId);
+          currentDoc = await DocumentService.update(currentDoc.id, {
+            // @ts-ignore
+            mongoDbId: persistRes.documentId,
+          }) || currentDoc;
+          setDocument(currentDoc);
+        } catch (persistError) {
+          console.warn("[S3] Failed to persist document in MongoDB:", persistError);
+        }
       } catch (s3Error) {
         console.warn("[S3] S3 upload failed — falling back to local flow:", s3Error);
         // Fallback to local upload / mock storage flow to keep pipeline moving
@@ -492,6 +514,21 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       validateDocumentState(currentDoc, false);
       setDocument(currentDoc);
 
+      // Sync parsed pagesContent to MongoDB
+      // @ts-ignore
+      if (currentDoc.mongoDbId) {
+        try {
+          // @ts-ignore
+          await updatePersistedDocument(currentDoc.mongoDbId, {
+            pages: content.textPages?.length || 0,
+            pagesContent: content.textPages || [],
+            status: "ParsingCompleted",
+          });
+        } catch (updateDbError) {
+          console.warn("[S3] Failed to sync pagesContent to MongoDB:", updateDbError);
+        }
+      }
+
       // Step 3: Extract Metadata
       pipelineDebugger.metadataStarted(file.name);
       
@@ -515,6 +552,20 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       }) || currentDoc;
       validateDocumentState(currentDoc, false);
       setDocument(currentDoc);
+
+      // Sync metadata and wordCount to MongoDB
+      // @ts-ignore
+      if (currentDoc.mongoDbId) {
+        try {
+          // @ts-ignore
+          await updatePersistedDocument(currentDoc.mongoDbId, {
+            wordCount: metadata.wordCount || 0,
+            status: "Ready",
+          });
+        } catch (updateDbError) {
+          console.warn("[S3] Failed to sync wordCount to MongoDB:", updateDbError);
+        }
+      }
 
       // Step 4: Generate Statistics and Insights
       pipelineDebugger.statisticsStarted(file.name);

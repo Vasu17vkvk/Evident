@@ -160,7 +160,7 @@ export function AICopilotPanel({
     setIsTyping(true);
 
     const documentText = document?.content?.fullText?.trim() || "No text content available.";
-
+    const docIdForChat = document?.mongoDbId || document?.id;
     const modelName = MODEL_MAP[selectedTier].name;
 
     await streamQuestion(trimmed, documentText, historySnapshot, {
@@ -204,7 +204,7 @@ export function AICopilotPanel({
         });
         setIsTyping(false);
       },
-    }, modelName);
+    }, modelName, docIdForChat);
   }, [document, isTyping, messages, updateMessageById, selectedTier]);
 
   return (

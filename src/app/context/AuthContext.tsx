@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { AuthService, EvidentUser } from "../services/auth/AuthService";
 import { AnonymousSessionService } from "../services/auth/AnonymousSessionService";
+import { auth } from "../services/auth/firebase";
 
 interface AuthContextType {
   user: EvidentUser | null;
@@ -32,7 +33,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Sync auth state live with Firebase Auth Listener
   useEffect(() => {
-    const unsubscribe = AuthService.onAuthStateChanged((evtUser) => {
+    const unsubscribe = AuthService.onAuthStateChanged(async (evtUser) => {
+      if (evtUser) {
+        try {
+          const firebaseUser = auth.currentUser;
+          if (firebaseUser) {
+            const idToken = await firebaseUser.getIdToken();
+            const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/auth/firebase`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken })
+            });
+            if (response.ok) {
+              const data = await response.json();
+              localStorage.setItem("access_token", data.access_token);
+              console.log("[AuthContext] Swapped Firebase ID token for custom backend JWT.");
+              console.log("Stored token:", localStorage.getItem("access_token"));
+            } else {
+              console.error("[AuthContext] Backend token exchange failed with status:", response.status);
+            }
+          }
+        } catch (tokenErr) {
+          console.error("[AuthContext] Failed to get/exchange Firebase ID token:", tokenErr);
+        }
+      } else {
+        localStorage.removeItem("access_token");
+      }
       setUser(evtUser);
       setLoading(false);
     });

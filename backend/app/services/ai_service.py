@@ -146,28 +146,37 @@ def get_working_model_name(selected_model: str | None = None) -> str:
 
 
 
-def ask_document(question: str, document_text: str, model_name: str | None = None) -> str:
+def ask_document(question: str, context_chunks: list[dict] | str, model_name: str | None = None) -> str:
+    if isinstance(context_chunks, str):
+        context_text = context_chunks
+    else:
+        formatted_chunks = []
+        for chunk in context_chunks:
+            page_num = chunk.get("pageNumber", "Unknown")
+            text = chunk.get("text", "")
+            formatted_chunks.append(f"--- [Page {page_num}] ---\n{text}")
+        context_text = "\n\n".join(formatted_chunks)
+
     prompt = f"""
 You are an AI document copilot assisting the user.
 
-Below is the document content to analyze and answer from:
----
-{document_text}
----
+Below is the retrieved document context to analyze and answer from:
+{context_text}
 
 User Question:
 {question}
 
 Instructions for your response:
 1. Tone & Style: Respond naturally and conversationally, as a human teammate would.
-2. Avoid robotic phrasing: Do NOT use phrases like "The document is identified as...", "The document contains...", "Based on the provided document...".
+2. Avoid robotic phrasing: Do NOT use phrases like "The document is identified as...", "Based on the provided chunks...", "According to the context...".
 3. Use human language: Use phrases like "I found that...", "It looks like...", "From what I can see...", "This section appears to discuss...".
-4. Structure:
+4. Citations: When referring to information from a specific page, always cite the source page number using the format [Page X] (e.g., "[Page 3]"). This is extremely important. If information spans multiple pages, cite them all (e.g., "[Page 1], [Page 2]").
+5. Structure:
    - Keep the answer concise.
    - Use short, readable paragraphs.
    - Use bullet points when useful.
-5. Uncertainty: If the answer is not clearly stated in the document or confidence is low, clearly mention the uncertainty or limitations.
-6. Follow-up: End with a friendly, helpful follow-up suggestion or question to guide the user's next steps if appropriate.
+6. Uncertainty: If the answer cannot be found in the provided context, clearly mention the uncertainty or limitations.
+7. Follow-up: End with a friendly, helpful follow-up suggestion or question to guide the user's next steps if appropriate.
 """
 
     model_to_use = get_working_model_name(model_name)
