@@ -9,6 +9,7 @@ interface Props {
   searchQuery?: string;
   searchResults?: any[];
   activeIndex?: number | null;
+  onRenderFailed?: () => void;
 }
 
 export function PDFDocumentRenderer(props: Props) {

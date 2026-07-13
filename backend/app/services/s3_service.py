@@ -46,6 +46,25 @@ def generate_upload_url(filename: str, content_type: str):
     }
 
 
+def generate_download_url(object_key: str, expires_in: int = 3600) -> str | None:
+    """
+    Generate a presigned GET URL for downloading files.
+    """
+    try:
+        download_url = s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": BUCKET_NAME,
+                "Key": object_key
+            },
+            ExpiresIn=expires_in
+        )
+        return download_url
+    except Exception as e:
+        print(f"[S3] Error generating download URL: {e}")
+        return None
+
+
 def delete_file(object_key: str) -> bool:
     """
     Remove an object from the S3 bucket.
@@ -58,4 +77,5 @@ def delete_file(object_key: str) -> bool:
         return True
     except Exception as e:
         print(f"[S3] Error deleting object {object_key}: {e}")
-        raise e
+        raise e
+

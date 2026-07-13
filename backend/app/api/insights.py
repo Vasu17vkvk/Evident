@@ -19,11 +19,23 @@ async def get_document_insights(documentId: str, model: str | None = None, curre
             detail="You do not have permission to access insights for this document"
         )
     try:
-        insights = await InsightService.get_or_generate_insights(documentId, model)
+        insights = await InsightService.get_or_generate_insights(documentId, model, current_user["_id"])
         if not insights:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Insights or document not found for ID: {documentId}"
+            )
+        
+        # Log insight activity
+        doc = await DocumentService.get_document(documentId)
+        if doc:
+            from app.services.activity_service import ActivityService
+            await ActivityService.create_activity(
+                user_id=current_user["_id"],
+                activity_type="insight",
+                action="Generated insights",
+                document_name=doc["filename"],
+                document_id=documentId
             )
         return insights
     except HTTPException:

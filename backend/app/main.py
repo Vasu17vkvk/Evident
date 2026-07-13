@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import upload_router, chat_router, documents_router, insights_router, auth_router
+from app.api import upload_router, chat_router, documents_router, insights_router, auth_router, notes_router, dashboard_router
 from app.database.mongodb import connect_to_mongo, close_mongo_connection
 
 @asynccontextmanager
@@ -12,6 +12,9 @@ async def lifespan(app: FastAPI):
     print("Frontend Project (Configured): evident-ai-4a031")
     print("Backend Project (FIREBASE_PROJECT_ID):", os.getenv("FIREBASE_PROJECT_ID"))
     await connect_to_mongo()
+    # Create data-isolation indexes on startup
+    from app.database.indexes import create_indexes
+    await create_indexes()
     yield
     # Shutdown: Close database connection
     await close_mongo_connection()
@@ -44,6 +47,10 @@ app.include_router(chat_router)
 app.include_router(documents_router)
 app.include_router(insights_router)
 app.include_router(auth_router)
+app.include_router(notes_router)
+app.include_router(dashboard_router)
+
+
 
 @app.get("/")
 async def root():

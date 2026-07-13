@@ -11,14 +11,19 @@ logger = logging.getLogger("uvicorn.error")
 
 class InsightService:
     @staticmethod
-    async def get_or_generate_insights(document_id: str, default_model: str = None) -> dict:
-        # 1. Check if insights already exist for the document
-        existing = await db.db["insights"].find_one({"documentId": document_id})
+    async def get_or_generate_insights(document_id: str, default_model: str = None, user_id: str = None) -> dict:
+        # 1. Check if insights already exist for this user+document pair
+        existing = await db.db["insights"].find_one({"documentId": document_id, "userId": user_id})
         if existing:
             logger.info(f"[Insights] Returning cached insights for document: {document_id}")
-            # Map MongoDB _id out or convert to JSON serializable structure
-            existing["_id"] = str(existing["_id"])
-            return existing
+            return {
+                "documentId": existing["documentId"],
+                "executiveSummary": existing.get("summary", {}).get("executiveSummary", ""),
+                "documentPurpose": existing.get("summary", {}).get("documentPurpose", ""),
+                "entities": existing.get("entities", {"people": [], "organizations": [], "locations": []}),
+                "timeline": existing.get("timeline", []),
+                "facts": existing.get("facts", [])
+            }
 
         # 2. Fetch the document text
         # If it doesn't exist, we fallback to mock generation or return error
@@ -148,19 +153,31 @@ Respond ONLY with a valid JSON object matching this schema (do not wrap in markd
                 "timeline": []
             }
 
-        # 4. Save the generated insights to MongoDB
+        # 4. Save the generated insights to MongoDB using upsert
         insights_doc = {
+            "userId": user_id,
             "documentId": document_id,
-            "executiveSummary": insights_data.get("executiveSummary", ""),
-            "documentPurpose": insights_data.get("documentPurpose", ""),
-            "facts": insights_data.get("facts", []),
+            "summary": {
+                "executiveSummary": insights_data.get("executiveSummary", ""),
+                "documentPurpose": insights_data.get("documentPurpose", "")
+            },
             "entities": insights_data.get("entities", {"people": [], "organizations": [], "locations": []}),
             "timeline": insights_data.get("timeline", []),
-            "generationTimestamp": datetime.datetime.utcnow(),
-            "modelUsed": model_name
+            "facts": insights_data.get("facts", []),
+            "generatedAt": datetime.datetime.utcnow()
         }
 
-        result = await db.db["insights"].insert_one(insights_doc)
-        insights_doc["_id"] = str(result.inserted_id)
+        await db.db["insights"].update_one(
+            {"documentId": document_id, "userId": user_id},
+            {"$set": insights_doc},
+            upsert=True
+        )
 
-        return insights_doc
+        return {
+            "documentId": document_id,
+            "executiveSummary": insights_doc["summary"]["executiveSummary"],
+            "documentPurpose": insights_doc["summary"]["documentPurpose"],
+            "entities": insights_doc["entities"],
+            "timeline": insights_doc["timeline"],
+            "facts": insights_doc["facts"]
+        }

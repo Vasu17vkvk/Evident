@@ -37,6 +37,7 @@ interface Props {
   onNextResult?: () => void;
   onPrevResult?: () => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  showDocSearch?: boolean;
 }
 
 export function WorkspaceHeader({
@@ -51,6 +52,7 @@ export function WorkspaceHeader({
   onNextResult,
   onPrevResult,
   searchInputRef,
+  showDocSearch = false,
 }: Props) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -73,12 +75,12 @@ export function WorkspaceHeader({
         className="flex h-14 w-full items-center justify-between px-3 sm:px-5 md:h-[72px]"
       >
         {/* ── LEFT — Logo + Document name ── */}
-        <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           {/* Mobile: sidebar hamburger */}
           <button
             type="button"
             onClick={onSidebarToggle}
-            className="flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground transition-colors lg:hidden"
+            className="flex lg:hidden size-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             aria-label="Toggle sidebar"
           >
             <Menu className="size-5" strokeWidth={1.5} />
@@ -97,99 +99,109 @@ export function WorkspaceHeader({
           </a>
 
           {/* Vertical divider */}
-          <div className="hidden h-5 w-px shrink-0 bg-border lg:block" />
+          <div className="hidden lg:block h-5 w-px shrink-0 bg-border" />
 
           {/* Current document name */}
-          <div className="hidden items-center gap-2.5 min-w-0 lg:flex">
-            <FileText className="size-3.5 shrink-0 text-[#ff3d00]" strokeWidth={1.5} />
-            <span className="max-w-[220px] truncate font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-              {documentName}
-            </span>
-          </div>
+          {showDocSearch && (
+            <div className="hidden items-center gap-2.5 min-w-0 lg:flex">
+              <FileText className="size-3.5 shrink-0 text-[#ff3d00]" strokeWidth={1.5} />
+              <span className="max-w-[220px] truncate font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                {documentName}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* ── CENTER — Search field (desktop only) ── */}
-        <div className="mx-4 hidden max-w-[400px] flex-1 lg:flex animate-fade-in">
-          <div className="flex w-full items-center gap-3 border border-border bg-card px-4 py-2.5 focus-within:border-[#ff3d00]/40 transition-colors">
-            <Search
-              className="size-3.5 shrink-0 text-muted-foreground"
-              strokeWidth={1.5}
-            />
-            <input
-              ref={searchInputRef as React.RefObject<HTMLInputElement>}
-              type="text"
-              placeholder="Search inside document..."
-              value={searchQuery}
-              onChange={(e) => onSearchChange?.(e.target.value)}
-              className="w-full bg-transparent font-mono text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-              aria-label="Search inside document"
-            />
-            {/* Search navigation for desktop */}
-            {searchResultsCount > 0 && (
-              <div className="flex items-center gap-1 shrink-0 border-l border-border pl-2 font-mono text-[9px] text-muted-foreground select-none">
-                <span className="mr-1">
-                  {activeResultIndex !== null ? activeResultIndex + 1 : 0}/{searchResultsCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={onPrevResult}
-                  className="p-0.5 hover:text-foreground transition-colors cursor-pointer"
-                  title="Previous result"
-                >
-                  <ChevronDown className="size-3 rotate-180" strokeWidth={2.5} />
-                </button>
-                <button
-                  type="button"
-                  onClick={onNextResult}
-                  className="p-0.5 hover:text-foreground transition-colors cursor-pointer"
-                  title="Next result"
-                >
-                  <ChevronDown className="size-3" strokeWidth={2.5} />
-                </button>
-              </div>
-            )}
-            {/* Keyboard hint */}
-            <kbd className="hidden shrink-0 items-center gap-0.5 border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/50 sm:flex">
-              Ctrl+F
-            </kbd>
+        {showDocSearch && (
+          <div className="mx-4 hidden max-w-[400px] flex-1 lg:flex animate-fade-in">
+            <div className="flex w-full items-center gap-3 border border-border bg-card px-4 py-2.5 focus-within:border-[#ff3d00]/40 transition-colors">
+              <Search
+                className="size-3.5 shrink-0 text-muted-foreground"
+                strokeWidth={1.5}
+              />
+              <input
+                ref={searchInputRef as React.RefObject<HTMLInputElement>}
+                type="text"
+                placeholder="Search inside document..."
+                value={searchQuery}
+                onChange={(e) => onSearchChange?.(e.target.value)}
+                className="w-full bg-transparent font-mono text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                aria-label="Search inside document"
+              />
+              {/* Search navigation for desktop */}
+              {searchResultsCount > 0 && (
+                <div className="flex items-center gap-1 shrink-0 border-l border-border pl-2 font-mono text-[9px] text-muted-foreground select-none">
+                  <span className="mr-1">
+                    {activeResultIndex !== null ? activeResultIndex + 1 : 0}/{searchResultsCount}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onPrevResult}
+                    className="p-0.5 hover:text-foreground transition-colors cursor-pointer"
+                    title="Previous result"
+                  >
+                    <ChevronDown className="size-3 rotate-180" strokeWidth={2.5} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onNextResult}
+                    className="p-0.5 hover:text-foreground transition-colors cursor-pointer"
+                    title="Next result"
+                  >
+                    <ChevronDown className="size-3" strokeWidth={2.5} />
+                  </button>
+                </div>
+              )}
+              {/* Keyboard hint */}
+              <kbd className="hidden shrink-0 items-center gap-0.5 border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/50 sm:flex">
+                Ctrl+F
+              </kbd>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── RIGHT — Actions + Profile ── */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Mobile: search icon — toggles inline search bar below */}
-          <button
-            type="button"
-            onClick={() => setMobileSearchOpen((o) => !o)}
-            className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors lg:hidden"
-            aria-label="Toggle search"
-          >
-            {mobileSearchOpen ? (
-              <X className="size-4" strokeWidth={1.5} />
-            ) : (
-              <Search className="size-4" strokeWidth={1.5} />
-            )}
-          </button>
+          {showDocSearch && (
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen((o) => !o)}
+              className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors lg:hidden"
+              aria-label="Toggle search"
+            >
+              {mobileSearchOpen ? (
+                <X className="size-4" strokeWidth={1.5} />
+              ) : (
+                <Search className="size-4" strokeWidth={1.5} />
+              )}
+            </button>
+          )}
 
           {/* AI copilot toggle — desktop only (mobile uses bottom tab bar) */}
-          <button
-            type="button"
-            onClick={onCopilotToggle}
-            className="hidden lg:flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Toggle AI copilot"
-          >
-            <MessageSquare className="size-4" strokeWidth={1.5} />
-          </button>
+          {showDocSearch && (
+            <button
+              type="button"
+              onClick={onCopilotToggle}
+              className="hidden lg:flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Toggle AI copilot"
+            >
+              <MessageSquare className="size-4" strokeWidth={1.5} />
+            </button>
+          )}
 
           {/* Insights toggle — desktop only (mobile uses bottom tab bar) */}
-          <button
-            type="button"
-            onClick={onInsightsToggle}
-            className="hidden lg:flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Toggle insights panel"
-          >
-            <BarChart3 className="size-4" strokeWidth={1.5} />
-          </button>
+          {showDocSearch && (
+            <button
+              type="button"
+              onClick={onInsightsToggle}
+              className="hidden lg:flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Toggle insights panel"
+            >
+              <BarChart3 className="size-4" strokeWidth={1.5} />
+            </button>
+          )}
 
           {/* Vertical divider (desktop only) */}
           <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
@@ -198,7 +210,7 @@ export function WorkspaceHeader({
           <button
             type="button"
             onClick={toggleTheme}
-            className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             aria-label="Toggle theme"
           >
             {isDark ? (
@@ -249,21 +261,21 @@ export function WorkspaceHeader({
                   />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 bg-popover text-popover-foreground border border-border p-1 rounded-md shadow-md z-50">
+              <DropdownMenuContent align="end" className="w-48 bg-popover text-popover-foreground border border-border p-1 rounded-md shadow-md z-50 animate-fade-in">
                 <div className="border-b border-border/60 px-2.5 py-2">
                   <p className="text-[10px] font-semibold text-foreground truncate">{user.name}</p>
                   <p className="font-mono mt-0.5 text-[8px] text-muted-foreground truncate">{user.email}</p>
                 </div>
-                <DropdownMenuItem onClick={() => navigate("/account")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                <DropdownMenuItem onClick={() => navigate("/profile")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
                   Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/dashboard")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                <DropdownMenuItem onClick={() => navigate("/documents")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
                   Documents
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/dashboard")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                <DropdownMenuItem onClick={() => navigate("/exports")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
                   Exports
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/account")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
+                <DropdownMenuItem onClick={() => navigate("/settings")} className="cursor-pointer font-mono text-[9px] uppercase tracking-wider focus:bg-accent focus:text-accent-foreground rounded-sm px-2 py-1.5">
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-border/60 my-1" />
@@ -277,8 +289,8 @@ export function WorkspaceHeader({
       </div>
 
       {/* ── Mobile search bar (slides in below header) ── */}
-      {mobileSearchOpen && (
-        <div className="flex items-center gap-3 border-t border-border bg-background px-4 py-2.5 lg:hidden">
+      {showDocSearch && mobileSearchOpen && (
+        <div className="flex items-center gap-3 border-t border-border bg-background px-4 py-2.5 lg:hidden animate-fade-in">
           <Search className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
           <input
             type="text"
@@ -316,7 +328,7 @@ export function WorkspaceHeader({
             <button
               type="button"
               onClick={() => onSearchChange?.("")}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground animate-fade-in"
             >
               <X className="size-3.5" strokeWidth={1.5} />
             </button>

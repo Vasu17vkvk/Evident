@@ -22,6 +22,7 @@ interface Props {
   searchQuery?: string;
   searchResults?: any[];
   activeIndex?: number | null;
+  onRenderFailed?: () => void;
 }
 
 export function PDFViewer({
@@ -33,6 +34,7 @@ export function PDFViewer({
   searchQuery = "",
   searchResults = [],
   activeIndex = null,
+  onRenderFailed,
 }: Props) {
   const [pdf, setPdf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -60,8 +62,11 @@ export function PDFViewer({
         console.error("PDF load error:", err);
         setError("Failed to initialize canvas rendering engine. Please switch to the 'Text Reader' view above to view document text.");
         setLoading(false);
+        if (onRenderFailed) {
+          onRenderFailed();
+        }
       });
-  }, [url]);
+  }, [url, onRenderFailed]);
 
   const [pageWidth, setPageWidth] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);

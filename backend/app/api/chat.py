@@ -74,15 +74,31 @@ async def get_chat_history(documentId: str, current_user: dict = Depends(get_cur
     try:
         from app.database.mongodb import db
         
-        # Retrieve all messages for the specified documentId, sorted by timestamp ascending
-        messages = await db.db["chats"].find({"documentId": documentId}).sort("timestamp", 1).to_list(None)
+        # Retrieve conversation session scoped to this user AND document
+        conv = await db.db["conversations"].find_one({
+            "documentId": documentId,
+            "userId": current_user["_id"]
+        })
+        if not conv:
+            return []
         
+        messages = conv.get("messages", [])
+        
+        # Sort messages by timestamp ascending to guarantee ordering
+        try:
+            messages.sort(key=lambda m: m.get("timestamp"))
+        except Exception:
+            pass
+            
         response_messages = []
         for msg in messages:
+            ts = msg["timestamp"]
+            ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            
             response_messages.append(ChatMessageResponse(
                 role=msg["role"],
                 content=msg["content"],
-                timestamp=msg["timestamp"],
+                timestamp=ts_str,
                 model=msg.get("model"),
                 tokenUsage=msg.get("tokenUsage", 0)
             ))
@@ -128,6 +144,29 @@ async def post_chat_message(documentId: str, body: PersistedChatRequest, current
         )
         print(f"[CHAT] Gemini successfully answered persistent request: {answer[:60]}...")
 
+        # Increment document queryCount in MongoDB
+        from bson import ObjectId
+        try:
+            doc_oid = ObjectId(documentId)
+        except Exception:
+            doc_oid = documentId
+        await db.db["documents"].update_one(
+            {"_id": doc_oid},
+            {"$inc": {"queryCount": 1}}
+        )
+
+        # Log chat activity
+        doc = await DocumentService.get_document(documentId)
+        if doc:
+            from app.services.activity_service import ActivityService
+            await ActivityService.create_activity(
+                user_id=current_user["_id"],
+                activity_type="chat",
+                action="Asked a question",
+                document_name=doc["filename"],
+                document_id=documentId
+            )
+
         # 3. Parse page reference citations from answer text
         citations = []
         if not using_fallback and isinstance(context_chunks, list):
@@ -162,27 +201,39 @@ async def post_chat_message(documentId: str, body: PersistedChatRequest, current
         user_tokens = max(1, prompt_length // 4)
         assistant_tokens = max(1, len(answer) // 4)
 
-        # 5. Save User message
+        # 5. Construct user & assistant messages
         user_msg = {
-            "documentId": documentId,
             "role": "user",
             "content": body.question,
             "timestamp": datetime.datetime.utcnow(),
             "model": selected_model,
             "tokenUsage": user_tokens
         }
-        await db.db["chats"].insert_one(user_msg)
 
-        # 6. Save Assistant message
         assistant_msg = {
-            "documentId": documentId,
             "role": "assistant",
             "content": answer,
             "timestamp": datetime.datetime.utcnow(),
             "model": selected_model,
             "tokenUsage": assistant_tokens
         }
-        await db.db["chats"].insert_one(assistant_msg)
+
+        # 6. Save/push to conversations collection using upsert (scoped per user+document)
+        await db.db["conversations"].update_one(
+            {"documentId": documentId, "userId": current_user["_id"]},
+            {
+                "$set": {
+                    "userId": current_user["_id"],
+                    "updatedAt": datetime.datetime.utcnow()
+                },
+                "$push": {
+                    "messages": {
+                        "$each": [user_msg, assistant_msg]
+                    }
+                }
+            },
+            upsert=True
+        )
 
         return ChatResponse(
             answer=answer,

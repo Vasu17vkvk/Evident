@@ -100,3 +100,17 @@ export const streamQuestion = async (
         callbacks.onError(err);
     }
 };
+
+export interface ChatMessageResponse {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  model?: string;
+  tokenUsage?: number;
+  citations?: Array<{ text: string; page?: number; confidence?: number }>;
+}
+
+export const fetchChatHistory = async (documentId: string): Promise<ChatMessageResponse[]> => {
+  const response = await api.get(`/chat/${documentId}`);
+  return response.data;
+};

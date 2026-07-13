@@ -1,5 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
+import { useSidebar } from "../../context/SidebarContext";
+import { DocumentService } from "../../services/document/documentService";
+import { useAuth } from "../../context/AuthContext";
 import {
   FileText,
   Clock,
@@ -19,28 +23,28 @@ const NAV_ITEMS = [
     id: "documents",
     label: "Documents",
     icon: FileText,
-    path: "/dashboard",
+    path: "/documents",
     count: 24,
   },
   {
     id: "recent",
     label: "Recent",
     icon: Clock,
-    path: "/dashboard?tab=recent",
+    path: "/recent",
     count: 6,
   },
   {
     id: "favorites",
     label: "Favorites",
     icon: Star,
-    path: "/dashboard?tab=favorites",
+    path: "/favorites",
     count: 4,
   },
   {
     id: "notes",
     label: "Notes",
     icon: StickyNote,
-    path: "/dashboard?tab=notes",
+    path: "/notes",
     count: 11,
   },
 ];
@@ -50,7 +54,7 @@ const BOTTOM_ITEMS = [
     id: "settings",
     label: "Settings",
     icon: Settings,
-    path: "/account",
+    path: "/settings",
     count: null,
   },
 ];
@@ -64,15 +68,18 @@ const STORAGE_PCT = (STORAGE_USED_GB / STORAGE_TOTAL_GB) * 100;
 function NavItem({
   item,
   isActive,
+  onSelect,
 }: {
   item: (typeof NAV_ITEMS)[number] | (typeof BOTTOM_ITEMS)[number];
   isActive: boolean;
+  onSelect?: () => void;
 }) {
   const Icon = item.icon;
 
   return (
     <Link
       to={item.path}
+      onClick={onSelect}
       className={`
         group relative flex items-center gap-3 px-4 py-3 text-left transition-all duration-150
         ${
@@ -125,6 +132,35 @@ function NavItem({
 
 /* ── Storage card ─────────────────────────────── */
 function StorageCard() {
+  const [usedBytes, setUsedBytes] = useState(0);
+
+  useEffect(() => {
+    const calculateStorage = async () => {
+      try {
+        const docs = await DocumentService.getAll();
+        const totalBytes = docs.reduce((sum, doc) => sum + doc.size, 0);
+        setUsedBytes(totalBytes);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    calculateStorage();
+    window.addEventListener("evident-document-update", calculateStorage);
+    return () => window.removeEventListener("evident-document-update", calculateStorage);
+  }, []);
+
+  const STORAGE_USED_GB = usedBytes / (1024 * 1024 * 1024);
+  const STORAGE_TOTAL_GB = 10;
+  const STORAGE_PCT = Math.min(100, (STORAGE_USED_GB / STORAGE_TOTAL_GB) * 100);
+
+  const formatGB = (bytes: number) => {
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb < 0.001) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    return `${gb.toFixed(3)} GB`;
+  };
+
   return (
     <div className="border border-[#262626] bg-[#0f0f0f] p-4">
       {/* Card header */}
@@ -137,25 +173,25 @@ function StorageCard() {
 
       {/* Usage text */}
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[13px] font-semibold text-[#fafafa]">
-          {STORAGE_USED_GB} GB
-        </span>
+        <Link to="/storage" className="text-[13px] font-semibold text-[#fafafa] hover:text-[#ff3d00] transition-colors">
+          {formatGB(usedBytes)}
+        </Link>
         <span className="font-mono text-[9px] text-[#737373]">
           of {STORAGE_TOTAL_GB} GB
         </span>
       </div>
 
       {/* Progress bar */}
-      <div className="mb-4 h-1 w-full overflow-hidden bg-[#1a1a1a]">
+      <Link to="/storage" className="block mb-4 h-1 w-full overflow-hidden bg-[#1a1a1a]">
         <div
           className="h-full bg-[#ff3d00] transition-all duration-500"
           style={{ width: `${STORAGE_PCT}%` }}
         />
-      </div>
+      </Link>
 
       {/* Remaining note */}
       <p className="mb-4 font-mono text-[9px] text-[#737373]/60">
-        {(STORAGE_TOTAL_GB - STORAGE_USED_GB).toFixed(1)} GB remaining
+        {Math.max(0, STORAGE_TOTAL_GB - STORAGE_USED_GB).toFixed(3)} GB remaining
       </p>
 
       {/* Upgrade button */}
@@ -172,97 +208,155 @@ function StorageCard() {
 
 /* ── Props ────────────────────────────────────── */
 interface Props {
-  isOpen?: boolean;
-  onClose?: () => void;
-  /** Override active item (defaults to route-based detection) */
   activeId?: string;
 }
 
 /* ── Main component ───────────────────────────── */
-export function WorkspaceSidebar({ isOpen = true, onClose, activeId }: Props) {
+export function WorkspaceSidebar({ activeId }: Props) {
   const location = useLocation();
+  const { isOpen, setOpen } = useSidebar();
+  const { user } = useAuth();
+  const onClose = () => setOpen(false);
+
+  const [counts, setCounts] = useState({
+    documents: 0,
+    recent: 0,
+    favorites: 0,
+    notes: 0,
+  });
+
+  useEffect(() => {
+    const updateCounts = async () => {
+      try {
+        const docs = await DocumentService.getAll();
+        const docCount = docs.length;
+        const recentCount = docs.filter((d: any) => !!d.lastOpenedAt).slice(0, 10).length;
+        const favCount = docs.filter((d: any) => !!d.favorite).length;
+
+        let notesCount = 0;
+        const savedNotes = localStorage.getItem("evident_notes");
+        if (savedNotes) {
+          notesCount = JSON.parse(savedNotes).length;
+        }
+
+        setCounts({
+          documents: docCount,
+          recent: recentCount,
+          favorites: favCount,
+          notes: notesCount,
+        });
+      } catch (e) {
+        console.error("Failed to calculate sidebar counts:", e);
+      }
+    };
+
+    updateCounts();
+    window.addEventListener("evident-document-update", updateCounts);
+    return () => window.removeEventListener("evident-document-update", updateCounts);
+  }, [isOpen]);
+
+  // Close on ESC key press
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
 
   /* Determine active nav item */
   const getIsActive = (item: { id: string; path: string }) => {
     if (activeId) return item.id === activeId;
-    // Simple path matching — treat /dashboard as "documents"
-    if (item.id === "documents" && location.pathname === "/dashboard") return true;
-    if (item.id === "settings" && location.pathname.startsWith("/account")) return true;
+    if (location.pathname === item.path) return true;
+    if (item.id === "documents" && (location.pathname === "/dashboard" || location.pathname === "/documents")) return true;
+    if (item.id === "settings" && (location.pathname.startsWith("/account") || location.pathname.startsWith("/settings"))) return true;
     return false;
   };
 
+  const dynamicNavItems = NAV_ITEMS.map((item) => ({
+    ...item,
+    count: counts[item.id as keyof typeof counts] ?? 0,
+  }));
+
   return (
-    <>
-      {/* ── Mobile backdrop ─────────────────────── */}
+    <AnimatePresence>
       {isOpen && (
-        <div
-          className="fixed inset-0 z-20 bg-black/70 lg:hidden"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* ── Sidebar panel ───────────────────────── */}
-      <aside
-        className={`
-          fixed top-[72px] left-0 z-30 flex h-[calc(100vh-72px)]
-          flex-col border-r border-border bg-background
-          transition-all duration-200 ease-in-out
-          ${isOpen ? "translate-x-0 w-[260px] opacity-100" : "-translate-x-full w-0 opacity-0 border-none overflow-hidden"}
-          lg:relative lg:top-0 lg:z-auto lg:h-full lg:shrink-0
-        `}
-        aria-label="Workspace sidebar"
-      >
-        {/* ── Sidebar header ─────────────────────── */}
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-5">
-          <div className="flex items-center gap-2.5">
-            <FolderOpen className="size-4 text-[#ff3d00]" strokeWidth={1.5} />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-foreground">
-              Workspace
-            </span>
-          </div>
-          {/* Close button (mobile only) */}
-          <button
+        <>
+          {/* Backdrop with dark overlay and blur */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs"
             onClick={onClose}
-            className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground transition-colors lg:hidden"
-            aria-label="Close sidebar"
+            aria-hidden="true"
+          />
+
+          {/* Floating overlay drawer panel */}
+          <motion.aside
+            initial={{ x: "-100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "-100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 220 }}
+            className="fixed top-0 left-0 z-[101] flex h-full w-[320px] max-w-[85vw] flex-col border-r border-border bg-background shadow-2xl overflow-hidden"
+            aria-label="Workspace sidebar drawer"
           >
-            <X className="size-4" strokeWidth={1.5} />
-          </button>
-        </div>
+            {/* Sidebar header */}
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <FolderOpen className="size-4 text-[#ff3d00] shrink-0" strokeWidth={1.5} />
+                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-foreground truncate">
+                  Workspace
+                </span>
+              </div>
+              <button
+                onClick={onClose}
+                className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                aria-label="Close sidebar"
+              >
+                <X className="size-4" strokeWidth={1.5} />
+              </button>
+            </div>
 
-        {/* ── Main navigation ────────────────────── */}
-        <nav className="flex-1 overflow-y-auto">
-          {/* Top section label */}
-          <div className="px-5 pb-1 pt-5">
-            <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#737373]/40">
-              Navigation
-            </p>
-          </div>
+            {/* Main navigation */}
+            <nav className="flex-1 overflow-y-auto">
+              <div className="px-5 pb-1 pt-5">
+                <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#737373]/40">
+                  Navigation
+                </p>
+              </div>
 
-          {/* Primary nav items */}
-          <div className="flex flex-col">
-            {NAV_ITEMS.map((item) => (
-              <NavItem key={item.id} item={item} isActive={getIsActive(item)} />
-            ))}
-          </div>
+              {/* Primary nav items */}
+              <div className="flex flex-col mt-2">
+                {dynamicNavItems.map((item) => (
+                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={onClose} />
+                ))}
+              </div>
 
-          {/* Divider */}
-          <div className="mx-5 my-4 h-px bg-[#262626]" />
+              {/* Divider */}
+              <div className="mx-5 my-4 h-px bg-[#262626]" />
 
-          {/* Bottom nav items (Settings, etc.) */}
-          <div className="flex flex-col">
-            {BOTTOM_ITEMS.map((item) => (
-              <NavItem key={item.id} item={item} isActive={getIsActive(item)} />
-            ))}
-          </div>
-        </nav>
+              {/* Bottom nav items (Settings, etc.) */}
+              <div className="flex flex-col">
+                {BOTTOM_ITEMS.map((item) => (
+                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={onClose} />
+                ))}
+              </div>
+            </nav>
 
-        {/* ── Storage card (bottom) ──────────────── */}
-        <div className="shrink-0 border-t border-[#262626] p-4">
-          <StorageCard />
-        </div>
-      </aside>
-    </>
+            {/* Storage card (bottom) */}
+            <div className="shrink-0 border-t border-[#262626] p-4" onClick={onClose}>
+              <StorageCard />
+            </div>
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
   );
 }

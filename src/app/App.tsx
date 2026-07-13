@@ -14,10 +14,19 @@ import { SignIn } from "./components/sections/SignIn";
 import { Dashboard } from "./components/sections/Dashboard";
 import { Account } from "./components/sections/Account";
 import { Workspace } from "./components/sections/Workspace";
+import { DocumentsPage } from "./components/sections/DocumentsPage";
+import { RecentPage } from "./components/sections/RecentPage";
+import { FavoritesPage } from "./components/sections/FavoritesPage";
+import { NotesPage } from "./components/sections/NotesPage";
+import { ExportsPage } from "./components/sections/ExportsPage";
+import { StoragePage } from "./components/sections/StoragePage";
+import { ProfilePage } from "./components/sections/ProfilePage";
+import { SettingsPage } from "./components/sections/SettingsPage";
 import { Toaster } from "./components/ui/sonner";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { MigrationBanner } from "./components/auth/MigrationBanner";
 import { useAuth } from "./context/AuthContext";
+import { SidebarProvider } from "./context/SidebarContext";
 
 function Home() {
   return (
@@ -38,7 +47,19 @@ function AppContent() {
       <Routes>
         {/* Standalone full-screen pages */}
         <Route path="/signin" element={<SignIn />} />
-        <Route path="/workspace/:documentId" element={<Workspace />} />
+
+        {/* Protected Workspace Layout Routes (No public marketing header/footer) */}
+        <Route element={<ProtectedRoute />}>
+          <Route path="/workspace/:documentId" element={<Workspace />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/recent" element={<RecentPage />} />
+          <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/notes" element={<NotesPage />} />
+          <Route path="/exports" element={<ExportsPage />} />
+          <Route path="/storage" element={<StoragePage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
 
         {/* standard pages wrapping header / footer */}
         <Route
@@ -92,10 +113,12 @@ export default function App() {
   return (
     <AuthProvider>
       <DocumentProvider>
-        <BrowserRouter>
-          <Toaster position="bottom-right" />
-          <AppContent />
-        </BrowserRouter>
+        <SidebarProvider>
+          <BrowserRouter>
+            <Toaster position="bottom-right" />
+            <AppContent />
+          </BrowserRouter>
+        </SidebarProvider>
       </DocumentProvider>
     </AuthProvider>
   );

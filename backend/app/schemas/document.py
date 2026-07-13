@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import datetime
 
 class DocumentCreate(BaseModel):
     filename: str = Field(..., description="The name of the uploaded file")
@@ -20,7 +21,8 @@ class DocumentUpdate(BaseModel):
     pages: Optional[int] = None
     wordCount: Optional[int] = None
     pagesContent: Optional[list[str]] = None
-from datetime import datetime
+    favorite: Optional[bool] = None
+    lastOpenedAt: Optional[datetime] = None
 
 class DocumentListItem(BaseModel):
     documentId: str
@@ -30,9 +32,12 @@ class DocumentListItem(BaseModel):
     pageCount: int
     thumbnail: Optional[str] = None
     userId: Optional[str] = None
+    favorite: Optional[bool] = False
+    lastOpenedAt: Optional[datetime] = None
 
 class DocumentListResponse(BaseModel):
     documents: list[DocumentListItem]
     totalCount: int
     page: int
     limit: int
+

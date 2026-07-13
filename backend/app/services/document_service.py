@@ -24,7 +24,11 @@ class DocumentService:
             "pages": pages,
             "wordCount": word_count,
             "status": status,
-            "userId": user_id
+            "userId": user_id,
+            "queryCount": 0,
+            "citationCount": 0,
+            "favorite": False,
+            "lastOpenedAt": None
         }
         
         # Save to documents collection in MongoDB
@@ -59,15 +63,35 @@ class DocumentService:
         return result.modified_count > 0
 
     @staticmethod
-    async def get_documents(search: str = None, page: int = 1, limit: int = 20, user_id: str = None) -> tuple[list[dict], int]:
+    async def get_documents(
+        search: str = None,
+        page: int = 1,
+        limit: int = 20,
+        user_id: str = None,
+        sort_by: str = None,
+        order: str = "desc",
+        favorite: bool = None
+    ) -> tuple[list[dict], int]:
         query = {}
         if user_id:
             query["userId"] = user_id
         if search:
             query["filename"] = {"$regex": search, "$options": "i"}
+        if favorite is not None:
+            query["favorite"] = favorite
+
+        # Map frontend sort fields to database fields
+        sort_field_map = {
+            "name": "filename",
+            "size": "fileSize",
+            "date": "uploadTimestamp",
+            "lastOpened": "lastOpenedAt"
+        }
+        db_sort_field = sort_field_map.get(sort_by, "uploadTimestamp")
+        db_order = -1 if order == "desc" else 1
 
         skip = (page - 1) * limit
-        cursor = db.db["documents"].find(query).sort("uploadTimestamp", -1).skip(skip).limit(limit)
+        cursor = db.db["documents"].find(query).sort(db_sort_field, db_order).skip(skip).limit(limit)
         
         documents = await cursor.to_list(None)
         total_count = await db.db["documents"].count_documents(query)
@@ -80,7 +104,10 @@ class DocumentService:
                 "uploadDate": doc.get("uploadTimestamp") or doc.get("createdAt") or datetime.datetime.utcnow(),
                 "fileSize": doc.get("fileSize", 0),
                 "pageCount": doc.get("pages", 0),
-                "thumbnail": doc.get("thumbnail")
+                "thumbnail": doc.get("thumbnail"),
+                "userId": doc.get("userId"),
+                "favorite": doc.get("favorite", False),
+                "lastOpenedAt": doc.get("lastOpenedAt")
             })
             
         return result_docs, total_count
@@ -114,14 +141,16 @@ class DocumentService:
             async with await db.client.start_session() as session:
                 async with session.start_transaction():
                     await db.db["documents"].delete_one({"_id": doc_oid}, session=session)
-                    await db.db["chats"].delete_many({"documentId": document_id}, session=session)
+                    await db.db["conversations"].delete_one({"documentId": document_id}, session=session)
                     await db.db["insights"].delete_one({"documentId": document_id}, session=session)
+                    await db.db["notes"].delete_many({"documentId": document_id}, session=session)
         except Exception as tx_err:
             # Fallback if MongoDB is running standalone without replica sets
             print(f"[DocumentService] Transactional session failed or not supported: {tx_err}. Falling back to sequential execution...")
             await db.db["documents"].delete_one({"_id": doc_oid})
-            await db.db["chats"].delete_many({"documentId": document_id})
+            await db.db["conversations"].delete_one({"documentId": document_id})
             await db.db["insights"].delete_one({"documentId": document_id})
+            await db.db["notes"].delete_many({"documentId": document_id})
 
         return True
 
@@ -138,11 +167,39 @@ class DocumentService:
             return False
 
         doc_user_id = doc.get("userId")
-        # For backward compatibility, allow access to unassigned documents
+        # Documents without an owner are accessible to no one
         if not doc_user_id:
-            return True
+            return False
 
         return str(doc_user_id) == str(user_id)
+
+    @staticmethod
+    async def get_document(document_id: str) -> dict | None:
+        from bson import ObjectId
+        try:
+            doc_oid = ObjectId(document_id)
+        except Exception:
+            doc_oid = document_id
+
+        doc = await db.db["documents"].find_one({"_id": doc_oid})
+        if not doc:
+            return None
+        
+        return {
+            "documentId": str(doc["_id"]),
+            "filename": doc.get("filename"),
+            "uploadDate": doc.get("uploadTimestamp") or doc.get("createdAt") or datetime.datetime.utcnow(),
+            "fileSize": doc.get("fileSize", 0),
+            "pageCount": doc.get("pages", 0),
+            "mimeType": doc.get("mimeType"),
+            "fileUrl": doc.get("fileUrl"),
+            "objectKey": doc.get("objectKey"),
+            "status": doc.get("status", "Uploaded"),
+            "userId": str(doc.get("userId")) if doc.get("userId") else None,
+            "pagesContent": doc.get("pagesContent", []),
+            "favorite": doc.get("favorite", False),
+            "lastOpenedAt": doc.get("lastOpenedAt")
+        }
 
 
 

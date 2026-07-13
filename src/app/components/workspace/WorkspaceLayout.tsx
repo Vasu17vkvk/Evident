@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { FileText, MessageSquare, BarChart3, FolderOpen, Settings as SettingsIcon } from "lucide-react";
-import { WorkspaceHeader } from "./WorkspaceHeader";
-import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import { FileText, MessageSquare, BarChart3, Settings as SettingsIcon } from "lucide-react";
+import { WorkspaceShell } from "./WorkspaceShell";
 import { DocumentViewer } from "./DocumentViewer";
 import { AICopilotPanel } from "./AICopilotPanel";
 import { InsightsPanel } from "./InsightsPanel";
@@ -27,11 +26,22 @@ export function WorkspaceLayout({
   userInitials = "U",
   showMessages = false,
 }: Props) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(true); // Default Copilot to open on desktop
   const [insightsOpen, setInsightsOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get("page");
+    return p ? parseInt(p) : 1;
+  });
   const [currentView, setCurrentView] = useState<"pdf" | "text">("pdf");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get("page");
+    if (p) {
+      setCurrentPage(parseInt(p));
+    }
+  }, [window.location.search]);
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileTab, setMobileTab] = useState<MobileTab>("document");
   const { document, hasDocument } = useDocument();
@@ -107,7 +117,43 @@ export function WorkspaceLayout({
   ];
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    <WorkspaceShell
+      activeId="documents"
+      showDocSearch={true}
+      documentName={displayDocumentName}
+      searchQuery={searchQuery}
+      onSearchChange={(q) => {
+        if (emergencyFallback) return;
+        setSearchQuery(q);
+      }}
+      onCopilotToggle={() => {
+        if (emergencyFallback) {
+          // Prevent trapping user into AI UI during long processing.
+          return;
+        }
+        // On mobile: switch to copilot tab
+        if (window.innerWidth < 1024) {
+          setMobileTab("copilot");
+        } else {
+          setCopilotOpen((o) => !o);
+        }
+      }}
+      onInsightsToggle={() => {
+        if (emergencyFallback) {
+          return;
+        }
+        if (window.innerWidth < 1024) {
+          setMobileTab("insights");
+        } else {
+          setInsightsOpen((o) => !o);
+        }
+      }}
+      searchResultsCount={searchResults.length}
+      activeResultIndex={activeIndex}
+      onNextResult={handleNextResult}
+      onPrevResult={handlePrevResult}
+      searchInputRef={searchInputRef}
+    >
       <style>{`
         :root {
           --navbar-height: 64px;
@@ -118,52 +164,9 @@ export function WorkspaceLayout({
           }
         }
       `}</style>
-      <WorkspaceHeader
-        documentName={displayDocumentName}
-        userName={userName}
-        userEmail={userEmail}
-        userInitials={userInitials}
-        searchQuery={searchQuery}
-        onSearchChange={(q) => {
-          if (emergencyFallback) return;
-          setSearchQuery(q);
-        }}
-        onSidebarToggle={() => setSidebarOpen((o) => !o)}
-        onCopilotToggle={() => {
-          if (emergencyFallback) {
-            // Prevent trapping user into AI UI during long processing.
-            return;
-          }
-          // On mobile: switch to copilot tab
-          if (window.innerWidth < 1024) {
-            setMobileTab("copilot");
-          } else {
-            setCopilotOpen((o) => !o);
-          }
-        }}
-        onInsightsToggle={() => {
-          if (emergencyFallback) {
-            return;
-          }
-          if (window.innerWidth < 1024) {
-            setMobileTab("insights");
-          } else {
-            setInsightsOpen((o) => !o);
-          }
-        }}
-        searchResultsCount={searchResults.length}
-        activeResultIndex={activeIndex}
-        onNextResult={handleNextResult}
-        onPrevResult={handlePrevResult}
-        searchInputRef={searchInputRef}
-      />
 
       {/* ── Desktop layout: side-by-side panels ── */}
-      <div className="relative hidden lg:flex flex-1 overflow-hidden">
-        <WorkspaceSidebar
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
+      <div className="relative hidden lg:flex h-full w-full overflow-hidden">
         <DocumentViewer
           documentName={displayDocumentName}
           currentPage={currentPage}
@@ -206,22 +209,13 @@ export function WorkspaceLayout({
 
       {/* ── Mobile layout: tabbed panels ── */}
       <div
-        className="flex lg:hidden flex-1 flex-col overflow-hidden"
+        className="flex lg:hidden h-full flex-col overflow-hidden"
         style={{
           paddingBottom: "calc(var(--navbar-height) + env(safe-area-inset-bottom))",
         }}
       >
-        {/* Mobile sidebar drawer (over content) */}
-        <WorkspaceSidebar
-          isOpen={mobileTab === "files" || sidebarOpen}
-          onClose={() => {
-            setSidebarOpen(false);
-            setMobileTab("document");
-          }}
-        />
-
         {/* Tab content area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden h-full">
           {mobileTab === "document" && (
             <DocumentViewer
               documentName={displayDocumentName}
@@ -263,20 +257,6 @@ export function WorkspaceLayout({
               />
             </div>
           )}
-          {mobileTab === "files" && (
-            // Files tab opens the sidebar drawer — show doc viewer behind
-            <DocumentViewer
-              documentName={displayDocumentName}
-              currentPage={currentPage}
-              onPageChange={setCurrentPage}
-              currentView={currentView}
-              onViewChange={setCurrentView}
-              searchQuery={effectiveSearchQuery}
-              onInsightsToggle={() => setMobileTab("insights")}
-              searchResults={searchResults}
-              activeIndex={activeIndex}
-            />
-          )}
           {mobileTab === "settings" && (
             <div className="flex flex-col h-full overflow-y-auto">
               <Account />
@@ -299,21 +279,20 @@ export function WorkspaceLayout({
                 key={id}
                 type="button"
                 onClick={() => {
-                  if (id === "files") {
-                    setSidebarOpen(true);
-                  }
                   setMobileTab(id);
                 }}
-                className={`flex flex-1 flex-col items-center justify-center gap-1 py-3 transition-colors relative ${isActive
+                className={`flex flex-1 flex-col items-center justify-center gap-1 py-3 transition-colors relative ${
+                  isActive
                     ? "text-[#ff3d00]"
                     : "text-muted-foreground hover:text-foreground"
-                  }`}
+                }`}
                 aria-label={label}
               >
                 {/* Active top accent line */}
                 <span
-                  className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full transition-all duration-200 ${isActive ? "bg-[#ff3d00] opacity-100" : "opacity-0"
-                    }`}
+                  className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full transition-all duration-200 ${
+                    isActive ? "bg-[#ff3d00] opacity-100" : "opacity-0"
+                  }`}
                 />
                 <Icon className={`${isActive ? "size-5" : "size-4"} transition-all duration-150`} strokeWidth={isActive ? 2 : 1.5} />
                 <span className={`font-mono text-[8px] uppercase tracking-wider transition-all duration-150 ${isActive ? "font-semibold" : ""}`}>
@@ -324,6 +303,6 @@ export function WorkspaceLayout({
           })}
         </nav>
       </div>
-    </div>
+    </WorkspaceShell>
   );
 }

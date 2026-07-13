@@ -120,6 +120,8 @@ export interface DocumentLibraryResponse {
     pageCount: number;
     thumbnail?: string;
     userId?: string;
+    favorite?: boolean;
+    lastOpenedAt?: string;
   }>;
   totalCount: number;
   page: number;
@@ -129,12 +131,124 @@ export interface DocumentLibraryResponse {
 export const fetchDocuments = async (
   search?: string,
   page = 1,
-  limit = 20
+  limit = 20,
+  sortBy?: string,
+  order?: string,
+  favorite?: boolean
 ): Promise<DocumentLibraryResponse> => {
   let url = `/documents?page=${page}&limit=${limit}`;
   if (search) {
     url += `&search=${encodeURIComponent(search)}`;
   }
+  if (sortBy) {
+    url += `&sortBy=${encodeURIComponent(sortBy)}`;
+  }
+  if (order) {
+    url += `&order=${encodeURIComponent(order)}`;
+  }
+  if (favorite !== undefined) {
+    url += `&favorite=${favorite}`;
+  }
   const response = await api.get(url);
   return response.data;
+};
+
+export interface NoteResponse {
+  noteId: string;
+  title: string;
+  content: string;
+  documentId?: string;
+  documentName?: string;
+  pageNumber?: number;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+}
+
+export interface NoteCreateRequest {
+  title: string;
+  content: string;
+  documentId?: string;
+  pageNumber?: number;
+}
+
+export interface NoteUpdateRequest {
+  title?: string;
+  content?: string;
+  documentId?: string;
+  pageNumber?: number;
+}
+
+export const fetchNotes = async (): Promise<NoteResponse[]> => {
+  const response = await api.get("/notes");
+  return response.data;
+};
+
+export const createPersistedNote = async (payload: NoteCreateRequest): Promise<{ noteId: string }> => {
+  const response = await api.post("/notes", payload);
+  return response.data;
+};
+
+export const updatePersistedNote = async (noteId: string, payload: NoteUpdateRequest): Promise<void> => {
+  await api.put(`/notes/${noteId}`, payload);
+};
+
+export const deletePersistedNote = async (noteId: string): Promise<void> => {
+  await api.delete(`/notes/${noteId}`);
+};
+
+export const deletePersistedDocument = async (documentId: string): Promise<void> => {
+  await api.delete(`/documents/${documentId}`);
+};
+
+export const fetchDocumentDownloadUrl = async (documentId: string): Promise<{ downloadUrl: string }> => {
+  const response = await api.get(`/documents/${documentId}/download`);
+  return response.data;
+};
+
+export interface DashboardStats {
+  documentsUploaded: number;
+  totalQueries: number;
+  citationsGenerated: number;
+  avgResponseTime: number;
+}
+
+export interface DashboardRecentDocument {
+  documentId: string;
+  filename: string;
+  uploadDate: string;
+  fileSize: number;
+  pageCount: number;
+  favorite: boolean;
+  lastOpenedAt?: string;
+  queryCount: number;
+  citationCount: number;
+}
+
+export interface DashboardActivity {
+  activityId: string;
+  type: string;
+  action: string;
+  documentName?: string;
+  documentId?: string;
+  createdAt: string;
+}
+
+export const fetchDashboardStats = async (): Promise<DashboardStats> => {
+  const response = await api.get("/dashboard/stats");
+  return response.data;
+};
+
+export const fetchDashboardRecentDocuments = async (): Promise<DashboardRecentDocument[]> => {
+  const response = await api.get("/dashboard/recent-documents");
+  return response.data;
+};
+
+export const fetchDashboardRecentActivity = async (): Promise<DashboardActivity[]> => {
+  const response = await api.get("/dashboard/recent-activity");
+  return response.data;
+};
+
+export const trackCitationCopy = async (documentId: string): Promise<void> => {
+  await api.post(`/documents/${documentId}/citation`);
 };

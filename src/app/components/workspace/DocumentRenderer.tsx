@@ -13,6 +13,7 @@ interface Props {
   currentView?: "pdf" | "text";
   searchResults?: any[];
   activeIndex?: number | null;
+  onRenderFailed?: () => void;
 }
 
 export function DocumentRenderer({
@@ -25,6 +26,7 @@ export function DocumentRenderer({
   currentView = "pdf",
   searchResults = [],
   activeIndex = null,
+  onRenderFailed,
 }: Props) {
   const extension = doc.extension?.toLowerCase() || "";
   const type = doc.type?.toLowerCase() || "";
@@ -67,7 +69,7 @@ export function DocumentRenderer({
   // Fallback to PDF renderer
   return (
     <PDFDocumentRenderer
-      url={doc.url || ""}
+      url={doc.viewerUrl || doc.url || ""}
       currentPage={currentPage}
       onPageChange={onPageChange}
       scale={scale}
@@ -75,6 +77,7 @@ export function DocumentRenderer({
       searchQuery={searchQuery}
       searchResults={searchResults}
       activeIndex={activeIndex}
+      onRenderFailed={onRenderFailed}
     />
   );
 }

@@ -4,18 +4,26 @@ import {
   DocumentStatus,
 } from "../../types/document";
 import { openDB, DBSchema } from "idb";
+import { fetchDocuments, updatePersistedDocument, deletePersistedDocument } from "../../../services/api/api";
 
 interface EvidentDB extends DBSchema {
   documents: {
     key: string;
     value: Document;
   };
+  chatHistory: {
+    key: string;
+    value: any;
+  };
 }
 
-const dbPromise = openDB<EvidentDB>("EvidentDocumentDB", 1, {
-  upgrade(db) {
+const dbPromise = openDB<EvidentDB>("EvidentDocumentDB", 2, {
+  upgrade(db, oldVersion) {
     if (!db.objectStoreNames.contains("documents")) {
       db.createObjectStore("documents", { keyPath: "id" });
+    }
+    if (oldVersion < 2 && !db.objectStoreNames.contains("chatHistory")) {
+      db.createObjectStore("chatHistory", { keyPath: "documentId" });
     }
   },
 });
@@ -45,6 +53,7 @@ export class DocumentService {
   static async restore(doc: Document) {
     const db = await dbPromise;
     await db.put("documents", doc);
+    window.dispatchEvent(new CustomEvent("evident-document-update"));
   }
 
   // Create a new document
@@ -72,6 +81,7 @@ export class DocumentService {
     };
     const db = await dbPromise;
     await db.put("documents", document);
+    window.dispatchEvent(new CustomEvent("evident-document-update"));
     return document;
   }
 
@@ -100,6 +110,27 @@ export class DocumentService {
     }
 
     await db.put("documents", result);
+
+    // Sync to MongoDB backend if authenticated and has mongoDbId
+    if (result.mongoDbId) {
+      try {
+        const backendUpdates: any = {};
+        if (updates.status !== undefined) backendUpdates.status = updates.status;
+        if (updates.pages !== undefined) backendUpdates.pages = updates.pages;
+        if (updates.wordCount !== undefined) backendUpdates.wordCount = updates.wordCount;
+        if (updates.pagesContent !== undefined) backendUpdates.pagesContent = updates.pagesContent;
+        if (updates.favorite !== undefined) backendUpdates.favorite = updates.favorite;
+        if (updates.lastOpenedAt !== undefined) backendUpdates.lastOpenedAt = updates.lastOpenedAt;
+
+        if (Object.keys(backendUpdates).length > 0) {
+          await updatePersistedDocument(result.mongoDbId, backendUpdates);
+        }
+      } catch (e) {
+        console.warn("Failed to sync updates to MongoDB:", e);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent("evident-document-update"));
     return result;
   }
 
@@ -118,6 +149,90 @@ export class DocumentService {
   // Delete a document
   static async delete(id: string): Promise<void> {
     const db = await dbPromise;
+    const existing = await db.get("documents", id);
+    
+    // Sync delete to MongoDB
+    if (existing?.mongoDbId) {
+      try {
+        await deletePersistedDocument(existing.mongoDbId);
+      } catch (e) {
+        console.warn("Failed to delete document from MongoDB backend:", e);
+      }
+    }
+
     await db.delete("documents", id);
+    window.dispatchEvent(new CustomEvent("evident-document-update"));
+  }
+
+  // Reconcile MongoDB documents with IndexedDB local cache
+  static async sync(userId?: string): Promise<Document[]> {
+    const token = localStorage.getItem("access_token");
+    if (!token || !userId) {
+      return this.getAll();
+    }
+
+    try {
+      // 1. Fetch from backend (max 100 documents)
+      const response = await fetchDocuments("", 1, 100);
+      const cloudDocs = response.documents;
+
+      // 2. Fetch all local docs from IndexedDB
+      const localDocs = await this.getAll();
+      const localDocMap = new Map(localDocs.map(d => [d.mongoDbId || d.id, d]));
+
+      const db = await dbPromise;
+      const cloudDocIds = new Set(cloudDocs.map(d => d.documentId));
+
+      // 3. Reconcile
+      for (const cloudDoc of cloudDocs) {
+        const existing = localDocMap.get(cloudDoc.documentId);
+        
+        if (existing) {
+          // Update details from cloud
+          const updated: Document = {
+            ...existing,
+            name: cloudDoc.filename,
+            size: cloudDoc.fileSize,
+            pages: cloudDoc.pageCount,
+            favorite: cloudDoc.favorite,
+            lastOpenedAt: cloudDoc.lastOpenedAt,
+            updatedAt: new Date(),
+          };
+          await db.put("documents", updated);
+        } else {
+          // Add new document placeholder from cloud
+          const now = new Date(cloudDoc.uploadDate);
+          const newDoc: Document = {
+            id: cloudDoc.documentId,
+            mongoDbId: cloudDoc.documentId,
+            name: cloudDoc.filename,
+            type: "application/pdf", // fallback
+            size: cloudDoc.fileSize,
+            pages: cloudDoc.pageCount,
+            status: DocumentStatus.Ready,
+            favorite: cloudDoc.favorite,
+            lastOpenedAt: cloudDoc.lastOpenedAt,
+            createdAt: now,
+            updatedAt: now,
+            uploadedAt: now,
+          };
+          await db.put("documents", newDoc);
+        }
+      }
+
+      // 4. Remove local documents that were deleted from the cloud
+      for (const localDoc of localDocs) {
+        if (localDoc.mongoDbId && !cloudDocIds.has(localDoc.mongoDbId)) {
+          await db.delete("documents", localDoc.id);
+        }
+      }
+
+    } catch (e) {
+      console.error("Failed to sync documents with backend:", e);
+    }
+
+    const updatedDocs = await this.getAll();
+    window.dispatchEvent(new CustomEvent("evident-document-update"));
+    return updatedDocs;
   }
 }

@@ -385,7 +385,7 @@ export function InsightsPanel({
                 <div className="flex h-[200px] flex-col items-center justify-center gap-3">
                   <Loader2 className="size-5 text-[#ff3d00] animate-spin" strokeWidth={1.5} />
                   <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground animate-pulse">
-                    Generating insights…
+                    {document?.mongoDbId ? "Loading saved insights…" : "Generating insights…"}
                   </span>
                 </div>
               ) : tab === "Summary" ? (

@@ -142,12 +142,16 @@ export interface Document {
   thumbnail?: string;
   text?: string;
   url?: string; // object URL for preview
+  viewerUrl?: string; // fresh S3 signed URL for preview
   storage?: DocumentStorage; // remote storage metadata from upload-url API
   pagesContent?: string[];
   wordCount?: number;
   characterCount?: number;
   estimatedReadingTime?: number;
   language?: string;
+  mongoDbId?: string;
+  favorite?: boolean;
+  lastOpenedAt?: string;
 }
 
 export type CreateDocumentInput = Partial<Omit<

@@ -19,7 +19,7 @@ import { MetadataService } from "../services/document/metadataService";
 import { StatisticsService } from "../services/document/statisticsService";
 import { DocumentValidatorService } from "../services/document/documentValidatorService";
 import { pipelineDebugger } from "../services/debug/pipelineDebugger";
-import { requestUploadUrl, persistDocument, updatePersistedDocument } from "../../services/api/api";
+import { requestUploadUrl, persistDocument, updatePersistedDocument, api, fetchDocumentDownloadUrl } from "../../services/api/api";
 
 // Timeout duration for processing states (15 seconds)
 const PROCESSING_TIMEOUT_MS = 15000;
@@ -45,6 +45,8 @@ interface DocumentContextType {
   updateDocument: (updates: Partial<Document>) => void;
   /** Retry processing for a failed document */
   retryProcessing: () => Promise<void>;
+  /** Select/Load a specific document as active */
+  selectDocument: (docOrId: Document | string) => Promise<void>;
 }
 
 export const DocumentContext = createContext<DocumentContextType | null>(null);
@@ -293,9 +295,26 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const activeId = localStorage.getItem("activeDocumentId");
     if (activeId) {
-      DocumentService.get(activeId).then((restoredDoc) => {
+      DocumentService.get(activeId).then(async (restoredDoc) => {
         if (restoredDoc) {
+          if (restoredDoc.originalFile) {
+            restoredDoc.url = URL.createObjectURL(restoredDoc.originalFile);
+          }
           setDocument(restoredDoc);
+
+          // Retrieve fresh viewerUrl from backend
+          if (restoredDoc.mongoDbId) {
+            try {
+              const backendRes = await api.get(`/documents/${restoredDoc.mongoDbId}`).then(res => res.data);
+              if (backendRes && backendRes.viewerUrl) {
+                restoredDoc.viewerUrl = backendRes.viewerUrl;
+                await DocumentService.update(restoredDoc.id, { viewerUrl: backendRes.viewerUrl });
+                setDocument({ ...restoredDoc });
+              }
+            } catch (e) {
+              console.warn("Failed to retrieve fresh viewerUrl from backend:", e);
+            }
+          }
         }
       });
     }
@@ -678,6 +697,136 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("activeDocumentId");
   }, [setDocument]);
 
+  const selectDocument = useCallback(async (docOrId: Document | string) => {
+    let targetDoc: Document | undefined;
+    let docId = typeof docOrId === "string" ? docOrId : docOrId.id;
+
+    targetDoc = await DocumentService.get(docId);
+
+    // If not found locally in IndexedDB, fetch it from MongoDB
+    if (!targetDoc) {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        try {
+          toast.loading("Opening cloud document...", { id: "open-doc" });
+          const backendRes = await api.get(`/documents/${docId}`).then(res => res.data);
+          const backendDoc = backendRes.document || backendRes;
+          const viewerUrl = backendRes.viewerUrl || "";
+          
+          const now = new Date(backendDoc.uploadDate || backendDoc.uploadTimestamp || new Date());
+          targetDoc = {
+            id: backendDoc.documentId || backendDoc._id || backendDoc.id,
+            mongoDbId: backendDoc.documentId || backendDoc._id || backendDoc.id,
+            name: backendDoc.filename || backendDoc.name,
+            type: backendDoc.mimeType || backendDoc.type || "application/pdf",
+            size: backendDoc.fileSize || backendDoc.size,
+            pages: backendDoc.pageCount || backendDoc.pages,
+            status: DocumentStatus.Ready,
+            favorite: backendDoc.favorite,
+            lastOpenedAt: backendDoc.lastOpenedAt,
+            createdAt: now,
+            updatedAt: now,
+            uploadedAt: now,
+            viewerUrl: viewerUrl,
+          };
+          await DocumentService.restore(targetDoc);
+          toast.dismiss("open-doc");
+        } catch (e) {
+          console.error("Failed to load document from backend:", e);
+          toast.error("Failed to open document from cloud.", { id: "open-doc" });
+          return;
+        }
+      }
+    }
+
+    // Refresh viewerUrl if found locally and has a MongoDB record
+    if (targetDoc && targetDoc.mongoDbId) {
+      try {
+        const backendRes = await api.get(`/documents/${targetDoc.mongoDbId}`).then(res => res.data);
+        if (backendRes && backendRes.viewerUrl) {
+          targetDoc.viewerUrl = backendRes.viewerUrl;
+          await DocumentService.update(targetDoc.id, { viewerUrl: backendRes.viewerUrl });
+        }
+      } catch (e) {
+        console.warn("Failed to retrieve fresh viewerUrl from backend:", e);
+      }
+    }
+
+    if (targetDoc) {
+      const nowStr = new Date().toISOString();
+      targetDoc.lastOpenedAt = nowStr;
+
+      // If document is not downloaded yet and has S3 details, download it!
+      if (!targetDoc.originalFile && targetDoc.mongoDbId) {
+        try {
+          toast.loading("Downloading file content...", { id: "download-file" });
+          const downloadRes = await fetchDocumentDownloadUrl(targetDoc.mongoDbId);
+          
+          const fileBlob = await fetch(downloadRes.downloadUrl).then(res => {
+            if (!res.ok) throw new Error("Download request failed");
+            return res.blob();
+          });
+          
+          const fileObj = new File([fileBlob], targetDoc.name, { type: targetDoc.type });
+          targetDoc.originalFile = fileObj;
+          targetDoc.url = URL.createObjectURL(fileObj);
+          
+          await DocumentService.restore(targetDoc);
+          toast.success("Document loaded successfully!", { id: "download-file" });
+        } catch (e) {
+          console.error("Failed to download file from S3:", e);
+          toast.error("Could not load document file from cloud storage.", { id: "download-file" });
+        }
+      } else if (targetDoc.originalFile && !targetDoc.url) {
+        targetDoc.url = URL.createObjectURL(targetDoc.originalFile);
+        await DocumentService.restore(targetDoc);
+      }
+
+      // Update lastOpenedAt locally
+      await DocumentService.update(targetDoc.id, { lastOpenedAt: nowStr });
+
+      // Sync lastOpenedAt to MongoDB
+      if (targetDoc.mongoDbId) {
+        try {
+          await updatePersistedDocument(targetDoc.mongoDbId, { lastOpenedAt: nowStr });
+        } catch (e) {
+          console.warn("Failed to sync lastOpenedAt to MongoDB:", e);
+        }
+      }
+
+      localStorage.setItem("activeDocumentId", targetDoc.id);
+
+      // Automatically load saved insights from backend if document is persisted
+      if (targetDoc.mongoDbId) {
+        try {
+          const res = await api.get(`/insights/${targetDoc.mongoDbId}`).then(res => res.data);
+          if (res) {
+            targetDoc.insights = {
+              executiveSummary: res.executiveSummary,
+              documentPurpose: res.documentPurpose,
+              readingTime: targetDoc.metadata?.estimatedReadingTime ? `${targetDoc.metadata.estimatedReadingTime} min` : "0 min",
+              tone: "Professional",
+              facts: res.facts || [],
+              entities: {
+                people: res.entities?.people || [],
+                organizations: res.entities?.organizations || [],
+                locations: res.entities?.locations || []
+              },
+              timeline: res.timeline || [],
+              keyTopics: [],
+              statistics: []
+            };
+            await DocumentService.restore(targetDoc);
+          }
+        } catch (e) {
+          console.warn("[EVIDENT] Failed to preload insights from backend:", e);
+        }
+      }
+
+      setDocument(targetDoc);
+    }
+  }, [setDocument]);
+
   return (
     <DocumentContext.Provider
       value={{
@@ -687,6 +836,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         hasDocument: !!document,
         updateDocument,
         retryProcessing,
+        selectDocument,
       }}
     >
       {children}

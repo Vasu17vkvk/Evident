@@ -14,9 +14,11 @@ import {
   Printer,
   RefreshCw,
   Loader2,
+  Menu,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useDocument } from "../../hooks/useDocument";
+import { useSidebar } from "../../context/SidebarContext";
 import { DocumentRenderer } from "./DocumentRenderer";
 import { DocumentStatus } from "../../types/document";
 import { ProcessingPipeline } from "./ProcessingPipeline";
@@ -56,6 +58,7 @@ export function DocumentViewer({
 }: Props) {
   const navigate = useNavigate();
   const { document, hasDocument, retryProcessing } = useDocument();
+  const { toggle: toggleSidebar } = useSidebar();
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -156,12 +159,36 @@ export function DocumentViewer({
       // Simulate short delay to display loading state
       await new Promise((resolve) => setTimeout(resolve, 800));
 
+      const getPref = (key: string, def = true) => {
+        const val = localStorage.getItem(key);
+        return val !== null ? val === "true" : def;
+      };
+
       const result = await ExportService.export(document, format, {
         includeContent: true,
-        includeMetadata: true,
-        includeInsights: true,
-        includeStatistics: true,
+        includeMetadata: getPref("evident_export_include_metadata", true),
+        includeInsights: getPref("evident_export_include_insights", true),
+        includeStatistics: getPref("evident_export_include_statistics", true),
       });
+
+      // Save to export history
+      try {
+        const historySaved = localStorage.getItem("evident_export_history");
+        const history = historySaved ? JSON.parse(historySaved) : [];
+        history.unshift({
+          id: Math.random().toString(36).substring(7),
+          documentId: document.id,
+          documentName: document.name,
+          format: format.toUpperCase(),
+          fileName: result.fileName,
+          fileSize: result.content instanceof Blob ? result.content.size : new Blob([result.content]).size,
+          generatedAt: new Date().toISOString(),
+          contentStr: typeof result.content === "string" ? result.content : null, // Store string contents directly for redownloads if small
+        });
+        localStorage.setItem("evident_export_history", JSON.stringify(history));
+      } catch (e) {
+        console.warn("Failed to save export to history:", e);
+      }
 
       // Browser automatic download
       downloadBlob(result.content as Blob, result.fileName);
@@ -265,24 +292,43 @@ export function DocumentViewer({
             )}
             <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-background px-2 sm:px-4">
               <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                {/* Desktop Menu toggle immediately before PDF/TEXT toggle */}
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  className="hidden lg:flex size-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm hover:bg-muted/10"
+                  aria-label="Toggle sidebar"
+                >
+                  <Menu className="size-4" strokeWidth={1.5} />
+                </button>
+                
+                {/* Vertical Divider after Menu */}
+                <div className="hidden lg:block h-4 w-px bg-border mx-1" />
+
                 {document.extension === "pdf" && (
-                  <div className="flex border border-border bg-card p-0.5 rounded-sm mr-1 sm:mr-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => onViewChange("pdf")}
-                      className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "pdf" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onViewChange("text")}
-                      className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "text" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      Text
-                    </button>
-                  </div>
+                  <>
+                    <div className="flex border border-border bg-card p-0.5 rounded-sm mr-1 sm:mr-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onViewChange("pdf")}
+                        className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "pdf" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onViewChange("text")}
+                        className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "text" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        Text
+                      </button>
+                    </div>
+
+                    {/* Vertical Divider after PDF/TEXT toggle */}
+                    <div className="hidden lg:block h-4 w-px bg-border mx-1" />
+                  </>
                 )}
+
                 <AlignLeft className="hidden sm:block size-3 text-muted-foreground/40 shrink-0" strokeWidth={1.5} />
                 <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/40 truncate max-w-[80px] sm:max-w-[150px] md:max-w-none">
                   {documentName}
@@ -437,6 +483,10 @@ export function DocumentViewer({
               currentView={currentView}
               searchResults={searchResults}
               activeIndex={activeIndex}
+              onRenderFailed={() => {
+                toast.error("PDF canvas preview failed. Automatically switched to Text Reader view.");
+                onViewChange("text");
+              }}
             />
           </>
         )

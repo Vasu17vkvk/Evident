@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { toast } from "sonner";
 import {
   Sparkles,
   SendHorizontal,
@@ -8,9 +9,10 @@ import {
   Loader2,
 } from "lucide-react";
 import { useDocument } from "../../hooks/useDocument";
-import { askQuestion, streamQuestion, type ConversationTurn, type MessageStatus, type ChatResponse } from "../../../services/ai/chatService";
+import { askQuestion, streamQuestion, fetchChatHistory, type ConversationTurn, type MessageStatus, type ChatResponse } from "../../../services/ai/chatService";
 import { SuggestionsService } from "../../services/document/SuggestionsService";
 import { ChatHistoryService, type PersistedMessage } from "../../services/document/ChatHistoryService";
+import { trackCitationCopy } from "../../../services/api/api";
 
 
 type ModelTier = "Economy" | "Balanced" | "Advanced";
@@ -53,6 +55,7 @@ export function AICopilotPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   
   const [selectedTier, setSelectedTier] = useState<ModelTier>(() => {
@@ -88,21 +91,51 @@ export function AICopilotPanel({
 
     // Document changed: clear the displayed messages while we load the new history
     setMessages([]);
-
-    if (prevDocIdRef.current !== undefined) {
-      // Previous document existed — its history was already saved; nothing to clear
-      // (We intentionally keep old history in IDB so the user can reopen it later)
-    }
-
     prevDocIdRef.current = docId;
+    setLoadingHistory(true);
 
-    ChatHistoryService.load(docId).then((persisted) => {
-      if (persisted.length === 0) return;
-      // Map PersistedMessage → UI Message (same shape — timestamp already present)
-      setMessages(persisted as Message[]);
-      console.log(`[EVIDENT] Chat history restored: ${persisted.length} messages for doc ${docId}`);
-    });
-  }, [document?.id]);
+    const token = localStorage.getItem("access_token");
+    const mongoDbId = document.mongoDbId;
+
+    if (token && mongoDbId) {
+      fetchChatHistory(mongoDbId)
+        .then((history) => {
+          if (history && history.length > 0) {
+            const mapped: Message[] = history.map((m) => ({
+              id: Math.random().toString(36).substring(7),
+              role: m.role,
+              content: m.content,
+              timestamp: new Date(m.timestamp).getTime(),
+              status: "complete",
+              citations: m.citations ? m.citations.map(c => ({
+                page: c.page || 1,
+                excerpt: c.text || "",
+                confidence: c.confidence || 0.9
+              })) : undefined
+            }));
+            setMessages(mapped);
+          } else {
+            return ChatHistoryService.load(docId).then((persisted) => {
+              setMessages(persisted as Message[]);
+            });
+          }
+        })
+        .catch((e) => {
+          console.warn("[EVIDENT] Failed to load chat history from backend, falling back to local:", e);
+          return ChatHistoryService.load(docId).then((persisted) => {
+            setMessages(persisted as Message[]);
+          });
+        })
+        .finally(() => {
+          setLoadingHistory(false);
+        });
+    } else {
+      ChatHistoryService.load(docId).then((persisted) => {
+        setMessages(persisted as Message[]);
+        setLoadingHistory(false);
+      });
+    }
+  }, [document?.id, document?.mongoDbId]);
 
   // Persist messages to IDB whenever the list changes
   useEffect(() => {
@@ -236,9 +269,16 @@ export function AICopilotPanel({
           </button>
         </div>
 
-        {/* ── Message / empty area ─────────────────── */}
         <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 ? (
+          {loadingHistory ? (
+            /* Loading state */
+            <div className="flex h-full flex-col items-center justify-center p-8 text-center animate-pulse">
+              <Loader2 className="size-6 text-[#ff3d00] animate-spin mb-4" />
+              <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+                Loading chat history...
+              </span>
+            </div>
+          ) : messages.length === 0 ? (
             /* Empty state */
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <div className="mb-5 flex size-10 items-center justify-center border border-border bg-card">
@@ -312,34 +352,55 @@ export function AICopilotPanel({
                       </p>
                       <div className="flex flex-col gap-2">
                         {msg.citations.map((c, i) => (
-                          <button
+                          <div
                             key={i}
-                            type="button"
-                            onClick={() => onCitationClick(c.page, c.excerpt)}
-                            className="group flex flex-col gap-2 rounded border border-border bg-card px-3 py-3 text-left hover:border-[#ff3d00]/40 transition-colors"
+                            className="group relative flex flex-col gap-2 rounded border border-border bg-card px-3 py-3 hover:border-[#ff3d00]/40 transition-colors"
                           >
-                            {/* Header row: page + confidence */}
+                            {/* Header row: page + confidence + copy */}
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono text-[9px] font-semibold text-[#ff3d00]">
-                                  Page {c.page}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => onCitationClick(c.page, c.excerpt)}
+                                className="flex items-center gap-1 text-left font-mono text-[9px] font-semibold text-[#ff3d00] hover:underline cursor-pointer"
+                              >
+                                Page {c.page}
+                              </button>
+                              <div className="flex items-center gap-2">
                                 <span className="font-mono text-[9px] text-muted-foreground/60">
                                   {Math.round(c.confidence * 100)}% confidence
                                 </span>
-                                <ChevronRight
-                                  className="size-2.5 text-muted-foreground/30 group-hover:text-[#ff3d00]/50 transition-colors"
-                                  strokeWidth={1.5}
-                                />
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    try {
+                                      await navigator.clipboard.writeText(c.excerpt);
+                                      toast.success("Citation excerpt copied!");
+                                      const activeDocId = localStorage.getItem("activeDocumentId");
+                                      if (activeDocId) {
+                                        await trackCitationCopy(activeDocId);
+                                        window.dispatchEvent(new CustomEvent("evident-document-update"));
+                                      }
+                                    } catch (err) {
+                                      console.error("Failed to copy citation:", err);
+                                    }
+                                  }}
+                                  className="text-muted-foreground/40 hover:text-[#ff3d00] transition-colors p-0.5 cursor-pointer"
+                                  title="Copy Citation text"
+                                >
+                                  <Copy className="size-2.5" />
+                                </button>
                               </div>
                             </div>
-                            {/* Quoted excerpt */}
-                            <p className="font-mono text-[10px] leading-relaxed text-muted-foreground line-clamp-3">
+                            {/* Quoted excerpt - clickable to scroll */}
+                            <div
+                              onClick={() => onCitationClick(c.page, c.excerpt)}
+                              className="font-mono text-[10px] leading-relaxed text-muted-foreground line-clamp-3 cursor-pointer hover:text-foreground transition-colors"
+                            >
                               &ldquo;{c.excerpt}&rdquo;
-                            </p>
-                          </button>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
