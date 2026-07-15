@@ -42,6 +42,12 @@ async def get_documents(
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def create_document(payload: DocumentCreate, current_user: dict = Depends(get_current_user)):
+    MAX_FILE_SIZE = 20 * 1024 * 1024
+    if payload.fileSize > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds the maximum limit of 20MB"
+        )
     try:
         doc_id = await DocumentService.create_document(
             filename=payload.filename,
@@ -74,7 +80,7 @@ async def create_document(payload: DocumentCreate, current_user: dict = Depends(
 
 @router.put("/{documentId}", status_code=status.HTTP_200_OK)
 async def update_document(documentId: str, payload: DocumentUpdate, current_user: dict = Depends(get_current_user)):
-    # Verify ownership
+    # Verify ownership — returns False if document doesn't exist or belongs to another user
     is_owner = await DocumentService.verify_owner(documentId, current_user["_id"])
     if not is_owner:
         raise HTTPException(
@@ -82,11 +88,16 @@ async def update_document(documentId: str, payload: DocumentUpdate, current_user
             detail="You do not have permission to modify this document"
         )
     try:
-        success = await DocumentService.update_document(documentId, payload.model_dump())
+        # Pass user_id so the service-layer filter also enforces ownership
+        success = await DocumentService.update_document(
+            documentId,
+            payload.model_dump(),
+            user_id=current_user["_id"]
+        )
         
         # Log open activity if lastOpenedAt was updated
         if payload.lastOpenedAt is not None:
-            doc = await DocumentService.get_document(documentId)
+            doc = await DocumentService.get_document(documentId, user_id=current_user["_id"])
             if doc:
                 from app.services.activity_service import ActivityService
                 await ActivityService.create_activity(
@@ -113,7 +124,8 @@ async def delete_document(documentId: str, current_user: dict = Depends(get_curr
             detail="You do not have permission to delete this document"
         )
     try:
-        success = await DocumentService.delete_document(documentId)
+        # Pass user_id so cascade deletes are also scoped to the owner
+        success = await DocumentService.delete_document(documentId, user_id=current_user["_id"])
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -130,6 +142,7 @@ async def delete_document(documentId: str, current_user: dict = Depends(get_curr
 
 @router.get("/{documentId}", response_model=dict, status_code=status.HTTP_200_OK)
 async def get_document(documentId: str, current_user: dict = Depends(get_current_user)):
+    # verify_owner now uses a single {_id, userId} query — 404-safe
     is_owner = await DocumentService.verify_owner(documentId, current_user["_id"])
     if not is_owner:
         raise HTTPException(
@@ -137,7 +150,7 @@ async def get_document(documentId: str, current_user: dict = Depends(get_current
             detail="You do not have permission to access this document"
         )
     try:
-        doc = await DocumentService.get_document(documentId)
+        doc = await DocumentService.get_document(documentId, user_id=current_user["_id"])
         if not doc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -155,6 +168,8 @@ async def get_document(documentId: str, current_user: dict = Depends(get_current
             "document": doc,
             "viewerUrl": viewer_url
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -170,7 +185,7 @@ async def get_document_download(documentId: str, current_user: dict = Depends(ge
             detail="You do not have permission to access this document"
         )
     try:
-        doc = await DocumentService.get_document(documentId)
+        doc = await DocumentService.get_document(documentId, user_id=current_user["_id"])
         if not doc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -214,15 +229,15 @@ async def track_citation_copy(documentId: str, current_user: dict = Depends(get_
         except Exception:
             doc_oid = documentId
 
-        # Increment citationCount in DB
+        # Increment citationCount scoped to the authenticated owner
         from app.database.mongodb import db
         await db.db["documents"].update_one(
-            {"_id": doc_oid},
+            {"_id": doc_oid, "userId": current_user["_id"]},
             {"$inc": {"citationCount": 1}}
         )
 
         # Log citation copy activity
-        doc = await DocumentService.get_document(documentId)
+        doc = await DocumentService.get_document(documentId, user_id=current_user["_id"])
         if doc:
             from app.services.activity_service import ActivityService
             await ActivityService.create_activity(

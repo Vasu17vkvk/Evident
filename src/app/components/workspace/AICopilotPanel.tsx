@@ -7,13 +7,26 @@ import {
   X,
   Copy,
   Loader2,
+  Trash2,
+  StickyNote,
 } from "lucide-react";
 import { useDocument } from "../../hooks/useDocument";
-import { askQuestion, streamQuestion, fetchChatHistory, type ConversationTurn, type MessageStatus, type ChatResponse } from "../../../services/ai/chatService";
+import { askQuestion, streamQuestion, fetchChatHistory, fetchChatSession, deleteChatSession, type ConversationTurn, type MessageStatus, type ChatResponse } from "../../../services/ai/chatService";
 import { SuggestionsService } from "../../services/document/SuggestionsService";
 import { ChatHistoryService, type PersistedMessage } from "../../services/document/ChatHistoryService";
 import { trackCitationCopy } from "../../../services/api/api";
 
+const stripHtml = (html: string): string => {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+};
 
 type ModelTier = "Economy" | "Balanced" | "Advanced";
 
@@ -56,6 +69,8 @@ export function AICopilotPanel({
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isClearingChat, setIsClearingChat] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   
   const [selectedTier, setSelectedTier] = useState<ModelTier>(() => {
@@ -91,13 +106,26 @@ export function AICopilotPanel({
 
     // Document changed: clear the displayed messages while we load the new history
     setMessages([]);
+    setSessionId(null);
     prevDocIdRef.current = docId;
+
+    if (document.isNewUpload) {
+      // It's a new upload: clear state, do NOT request history, do NOT show spinner
+      setLoadingHistory(false);
+      return;
+    }
+
     setLoadingHistory(true);
 
     const token = localStorage.getItem("access_token");
     const mongoDbId = document.mongoDbId;
 
     if (token && mongoDbId) {
+      // Fetch session info to get sessionId for clear-chat
+      fetchChatSession(mongoDbId)
+        .then((info) => setSessionId(info.sessionId))
+        .catch(() => { /* non-fatal — clear chat will skip backend call */ });
+
       fetchChatHistory(mongoDbId)
         .then((history) => {
           if (history && history.length > 0) {
@@ -106,7 +134,7 @@ export function AICopilotPanel({
               role: m.role,
               content: m.content,
               timestamp: new Date(m.timestamp).getTime(),
-              status: "complete",
+              status: "complete" as MessageStatus,
               citations: m.citations ? m.citations.map(c => ({
                 page: c.page || 1,
                 excerpt: c.text || "",
@@ -136,6 +164,37 @@ export function AICopilotPanel({
       });
     }
   }, [document?.id, document?.mongoDbId]);
+
+  // ── Clear chat handler ─────────────────────────────────────────────────
+  const handleClearChat = useCallback(async () => {
+    if (isClearingChat) return;
+    const docId = document?.id;
+    const mongoDbId = document?.mongoDbId;
+    const token = localStorage.getItem("access_token");
+
+    setIsClearingChat(true);
+    try {
+      // Delete backend session if authenticated and session exists
+      if (token && mongoDbId && sessionId) {
+        await deleteChatSession(sessionId);
+        setSessionId(null);
+      }
+      // Clear local IndexedDB history
+      if (docId) {
+        await ChatHistoryService.clear(docId);
+      }
+      setMessages([]);
+      toast.success("Chat history cleared");
+    } catch (e) {
+      console.warn("[EVIDENT] Failed to clear chat session:", e);
+      // Still clear locally even if backend call failed
+      if (docId) await ChatHistoryService.clear(docId);
+      setMessages([]);
+      toast.success("Chat history cleared");
+    } finally {
+      setIsClearingChat(false);
+    }
+  }, [document?.id, document?.mongoDbId, sessionId, isClearingChat]);
 
   // Persist messages to IDB whenever the list changes
   useEffect(() => {
@@ -260,13 +319,29 @@ export function AICopilotPanel({
               AI Copilot
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="size-3.5" strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Clear chat button — only shown when there are messages */}
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={isClearingChat}
+                title="Clear chat history"
+                className="flex size-6 items-center justify-center text-muted-foreground/50 hover:text-destructive transition-colors disabled:opacity-40"
+              >
+                {isClearingChat
+                  ? <Loader2 className="size-3 animate-spin" strokeWidth={1.5} />
+                  : <Trash2 className="size-3" strokeWidth={1.5} />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="size-3.5" strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -323,13 +398,37 @@ export function AICopilotPanel({
                       {msg.role === "user" ? "You" : "Copilot"}
                     </span>
                     {msg.role === "assistant" && msg.status === "complete" && (
-                      <button 
-                        type="button"
-                        onClick={() => navigator.clipboard.writeText(msg.content)}
-                        className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                      >
-                        <Copy className="size-3" strokeWidth={1.5} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const citationPage = msg.citations && msg.citations.length > 0 ? msg.citations[0].page : 1;
+                            window.dispatchEvent(new CustomEvent("evident-create-note", {
+                              detail: {
+                                title: "AI Response Note",
+                                content: msg.content,
+                                documentId: document?.mongoDbId || document?.id,
+                                pageNumber: citationPage
+                              }
+                            }));
+                          }}
+                          className="text-muted-foreground/40 hover:text-[#ff3d00] transition-colors"
+                          title="Save as Note"
+                        >
+                          <StickyNote className="size-3" strokeWidth={1.5} />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(msg.content);
+                            toast.success("Response copied to clipboard!");
+                          }}
+                          className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                          title="Copy to Clipboard"
+                        >
+                          <Copy className="size-3" strokeWidth={1.5} />
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -360,7 +459,7 @@ export function AICopilotPanel({
                             <div className="flex items-center justify-between">
                               <button
                                 type="button"
-                                onClick={() => onCitationClick(c.page, c.excerpt)}
+                                onClick={() => onCitationClick(c.page, stripHtml(c.excerpt))}
                                 className="flex items-center gap-1 text-left font-mono text-[9px] font-semibold text-[#ff3d00] hover:underline cursor-pointer"
                               >
                                 Page {c.page}
@@ -375,7 +474,7 @@ export function AICopilotPanel({
                                     e.stopPropagation();
                                     e.preventDefault();
                                     try {
-                                      await navigator.clipboard.writeText(c.excerpt);
+                                      await navigator.clipboard.writeText(stripHtml(c.excerpt));
                                       toast.success("Citation excerpt copied!");
                                       const activeDocId = localStorage.getItem("activeDocumentId");
                                       if (activeDocId) {
@@ -395,10 +494,10 @@ export function AICopilotPanel({
                             </div>
                             {/* Quoted excerpt - clickable to scroll */}
                             <div
-                              onClick={() => onCitationClick(c.page, c.excerpt)}
+                              onClick={() => onCitationClick(c.page, stripHtml(c.excerpt))}
                               className="font-mono text-[10px] leading-relaxed text-muted-foreground line-clamp-3 cursor-pointer hover:text-foreground transition-colors"
                             >
-                              &ldquo;{c.excerpt}&rdquo;
+                              &ldquo;{stripHtml(c.excerpt)}&rdquo;
                             </div>
                           </div>
                         ))}

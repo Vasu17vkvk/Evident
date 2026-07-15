@@ -119,7 +119,19 @@ export class DocumentService {
         if (updates.pages !== undefined) backendUpdates.pages = updates.pages;
         if (updates.wordCount !== undefined) backendUpdates.wordCount = updates.wordCount;
         if (updates.pagesContent !== undefined) backendUpdates.pagesContent = updates.pagesContent;
-        if (updates.favorite !== undefined) backendUpdates.favorite = updates.favorite;
+        if (updates.favorite !== undefined) {
+          backendUpdates.favorite = updates.favorite;
+          try {
+            const { addFavorite, deleteFavorite } = await import("../../../services/api/api");
+            if (updates.favorite) {
+              await addFavorite(result.mongoDbId);
+            } else {
+              await deleteFavorite(result.mongoDbId);
+            }
+          } catch (favErr) {
+            console.warn("Failed to sync favorites to MongoDB favorites collection:", favErr);
+          }
+        }
         if (updates.lastOpenedAt !== undefined) backendUpdates.lastOpenedAt = updates.lastOpenedAt;
 
         if (Object.keys(backendUpdates).length > 0) {

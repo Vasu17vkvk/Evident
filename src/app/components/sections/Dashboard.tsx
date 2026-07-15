@@ -2,38 +2,46 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   FileText, MessageSquare, Quote, TrendingUp,
-  Upload, Clock, Zap, MoreHorizontal, ArrowRight, Sparkles
+  Upload, Clock, Sparkles, StickyNote, Star,
+  Trash2, Download, Share, HardDrive, ArrowRight, MoreHorizontal
 } from "lucide-react";
 import { Container } from "../layout/Container";
 import { Section } from "../layout/Section";
 import { FadeIn, Stagger, StaggerItem } from "../layout/FadeIn";
 import { useAuth } from "../../context/AuthContext";
 import { toast } from "sonner";
-import {
-  fetchDashboardStats,
-  fetchDashboardRecentDocuments,
-  fetchDashboardRecentActivity,
-  type DashboardStats,
-  type DashboardRecentDocument,
-  type DashboardActivity
-} from "../../../services/api/api";
+import { fetchUnifiedDashboard } from "../../../services/api/api";
 
 const ACTIVITY_ICONS: Record<string, any> = {
-  upload: Upload,
-  open: FileText,
-  chat: MessageSquare,
-  citation_copy: Quote,
-  insight: Sparkles,
+  upload_document: Upload,
+  open_document: FileText,
+  ask_question: MessageSquare,
+  generate_insight: Sparkles,
+  create_note: StickyNote,
+  favorite_document: Star,
+  unfavorite_document: Star,
+  delete_document: Trash2,
+  delete_note: Trash2,
+  download_document: Download,
+  export_chat: Share,
 };
 
 export function Dashboard() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recentDocs, setRecentDocs] = useState<DashboardRecentDocument[]>([]);
-  const [activities, setActivities] = useState<DashboardActivity[]>([]);
-  
+  const [stats, setStats] = useState<{
+    documentsUploaded: number;
+    recentCount: number;
+    favoriteCount: number;
+    notesCount: number;
+    storageUsedMb: number;
+  } | null>(null);
+
+  const [recentDocs, setRecentDocs] = useState<any[]>([]);
+  const [favoriteDocs, setFavoriteDocs] = useState<any[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [notes, setNotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Redirect to sign in if not authenticated
@@ -44,16 +52,20 @@ export function Dashboard() {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsData, docsData, activityData] = await Promise.all([
-        fetchDashboardStats(),
-        fetchDashboardRecentDocuments(),
-        fetchDashboardRecentActivity(),
-      ]);
-      setStats(statsData);
-      setRecentDocs(docsData);
-      setActivities(activityData);
+      const data = await fetchUnifiedDashboard();
+      setStats({
+        documentsUploaded: data.stats.documents,
+        recentCount: data.stats.recent,
+        favoriteCount: data.stats.favorites,
+        notesCount: data.stats.notes,
+        storageUsedMb: data.stats.storage_used_mb,
+      });
+      setRecentDocs(data.recent_documents);
+      setFavoriteDocs(data.favorite_documents);
+      setNotes(data.recent_notes);
+      setActivities(data.activities);
     } catch (e) {
-      console.error("Failed to load dashboard statistics:", e);
+      console.error("Failed to load dashboard analytics:", e);
       toast.error("Failed to load live analytics.");
     } finally {
       setLoading(false);
@@ -69,10 +81,10 @@ export function Dashboard() {
   if (!user) return null;
 
   const statsConfig = [
-    { label: "Documents Uploaded", value: stats?.documentsUploaded ?? 0, sub: "Across all folders", icon: FileText },
-    { label: "Total Queries", value: stats?.totalQueries ?? 0, sub: "Asked by user", icon: MessageSquare },
-    { label: "Citations Generated", value: stats?.citationsGenerated ?? 0, sub: "Across all documents", icon: Quote },
-    { label: "Avg. Answer Speed", value: `${stats?.avgResponseTime ?? 1.8}s`, sub: "Gemini latency average", icon: Zap },
+    { label: "Documents Uploaded", value: stats?.documentsUploaded ?? 0, sub: "Across all folders", icon: FileText, path: "/workspace" },
+    { label: "Favorites", value: stats?.favoriteCount ?? 0, sub: "Starred documents", icon: Star, path: "/favorites" },
+    { label: "Notes", value: stats?.notesCount ?? 0, sub: "Saved workspace notes", icon: StickyNote, path: "/notes" },
+    { label: "Storage Used", value: `${stats?.storageUsedMb ?? 0} MB`, sub: "Used storage space", icon: HardDrive, path: "/workspace" },
   ];
 
   const formatFileSize = (bytes: number): string => {
@@ -123,7 +135,7 @@ export function Dashboard() {
               </p>
             </div>
             <button
-              onClick={() => navigate("/documents")}
+              onClick={() => navigate("/workspace")}
               className="mt-4 sm:mt-0 self-start sm:self-end inline-flex items-center gap-2 border border-[#ff3d00] bg-[#ff3d00]/10 px-4 py-2.5 text-xs font-mono uppercase tracking-widest text-[#ff3d00] hover:bg-[#ff3d00] hover:text-[#0a0a0a] transition-all duration-200 cursor-pointer rounded-sm"
             >
               <Upload className="size-3.5" strokeWidth={1.5} />
@@ -149,9 +161,12 @@ export function Dashboard() {
           </div>
         ) : (
           <Stagger className="mb-12 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {statsConfig.map(({ label, value, sub, icon: Icon }) => (
+            {statsConfig.map(({ label, value, sub, icon: Icon, path }) => (
               <StaggerItem key={label}>
-                <div className="group border border-border bg-[#0f0f0f]/40 p-5 hover:border-[#ff3d00]/40 hover:bg-[#ff3d00]/[0.02] transition-all duration-200 rounded-sm">
+                <div 
+                  onClick={() => navigate(path)}
+                  className="group border border-border bg-[#0f0f0f]/40 p-5 hover:border-[#ff3d00]/50 hover:bg-[#ff3d00]/[0.02] hover:shadow-[0_0_15px_rgba(255,61,0,0.15)] transition-all duration-300 transform hover:-translate-y-0.5 cursor-pointer rounded-sm"
+                >
                   <div className="mb-3 flex items-center justify-between">
                     <Icon className="size-4 text-[#ff3d00]" strokeWidth={1.5} />
                     <TrendingUp className="size-3 text-muted-foreground/45" strokeWidth={1.5} />
@@ -185,7 +200,7 @@ export function Dashboard() {
             
             {loading ? (
               <div className="border border-border divide-y divide-border rounded-sm overflow-hidden">
-                {[1, 2, 3, 4].map((i) => (
+                {[1, 2, 3].map((i) => (
                   <div key={i} className="flex items-center justify-between px-5 py-4 bg-[#0f0f0f]/20 animate-pulse">
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="size-8 rounded border border-border bg-input/20" />
@@ -201,12 +216,12 @@ export function Dashboard() {
             ) : recentDocs.length === 0 ? (
               <div className="flex flex-col items-center justify-center border border-dashed border-border bg-[#0f0f0f]/10 p-12 text-center rounded-sm">
                 <FileText className="size-8 text-muted-foreground/35 mb-4 animate-pulse" strokeWidth={1.5} />
-                <h3 className="text-xs font-semibold text-foreground">No documents found</h3>
+                <h3 className="text-xs font-semibold text-foreground">No recent documents yet.</h3>
                 <p className="mt-1 text-[11px] text-muted-foreground max-w-xs leading-relaxed mb-4">
                   Upload your first PDF, DOCX, or TXT document to start reasoning with RAG.
                 </p>
                 <button
-                  onClick={() => navigate("/documents")}
+                  onClick={() => navigate("/workspace")}
                   className="font-mono text-[9px] uppercase tracking-widest border border-[#ff3d00]/40 text-[#ff3d00] hover:bg-[#ff3d00]/10 px-4 py-2 transition-all cursor-pointer rounded-sm"
                 >
                   Upload File
@@ -229,7 +244,7 @@ export function Dashboard() {
                       <div className="min-w-0">
                         <p className="truncate text-xs font-medium text-foreground">{doc.filename}</p>
                         <p className="font-mono text-[9px] text-muted-foreground mt-0.5">
-                          {formatFileSize(doc.fileSize)} · {doc.queryCount} queries
+                          {formatFileSize(doc.fileSize)}
                         </p>
                       </div>
                     </div>
@@ -242,6 +257,80 @@ export function Dashboard() {
                       </button>
                     </div>
                   </Link>
+                ))}
+              </div>
+            )}
+
+            {/* Notes Section */}
+            <div className="flex items-center justify-between mt-8 mb-4">
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Recent Notes</h2>
+              <button
+                onClick={() => navigate("/notes")}
+                className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground hover:text-[#ff3d00] transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                View all <ArrowRight className="size-3" />
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="border border-border divide-y divide-border rounded-sm overflow-hidden">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between px-5 py-4 bg-[#0f0f0f]/20 animate-pulse">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="size-8 rounded border border-border bg-input/20" />
+                      <div className="space-y-1.5">
+                        <div className="h-3 w-32 bg-muted/20 rounded" />
+                        <div className="h-2.5 w-48 bg-muted/10 rounded" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : notes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center border border-dashed border-border bg-[#0f0f0f]/10 p-10 text-center rounded-sm">
+                <StickyNote className="size-8 text-muted-foreground/35 mb-3" strokeWidth={1.5} />
+                <h3 className="text-xs font-semibold text-foreground">No notes yet.</h3>
+                <p className="mt-1 text-[11px] text-muted-foreground max-w-xs leading-relaxed mb-3">
+                  Save important information while reading documents.
+                </p>
+                <button
+                  onClick={() => navigate("/notes")}
+                  className="font-mono text-[9px] uppercase tracking-widest border border-[#ff3d00]/40 text-[#ff3d00] hover:bg-[#ff3d00]/10 px-4 py-2 transition-all cursor-pointer rounded-sm"
+                >
+                  Create Note
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {notes.slice(0, 4).map((note) => (
+                  <div
+                    key={note.id}
+                    onClick={() => {
+                      if (note.documentId) {
+                        navigate(`/workspace/${encodeURIComponent(note.documentId)}?page=${note.pageNumber || 1}`);
+                      } else {
+                        navigate("/notes");
+                      }
+                    }}
+                    className="group border border-border bg-[#0f0f0f]/20 p-4 hover:border-[#ff3d00]/40 hover:bg-[#ff3d00]/[0.01] transition-all duration-200 rounded-sm cursor-pointer flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h4 className="text-xs font-semibold text-foreground truncate group-hover:text-[#ff3d00] transition-colors">{note.title || "Untitled Note"}</h4>
+                        <StickyNote className="size-3.5 text-muted-foreground/40 shrink-0 mt-0.5" strokeWidth={1.5} />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-3 leading-relaxed mb-4">
+                        {note.content}
+                      </p>
+                    </div>
+                    {note.documentName && (
+                      <div className="flex items-center gap-1.5 border-t border-border/40 pt-2 font-mono text-[9px] text-[#ff3d00]/70 truncate">
+                        <FileText className="size-3 text-[#ff3d00]/60" strokeWidth={1.5} />
+                        <span className="truncate">{note.documentName}</span>
+                        {note.pageNumber && <span className="shrink-0 text-muted-foreground">· p. {note.pageNumber}</span>}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -269,9 +358,9 @@ export function Dashboard() {
             ) : activities.length === 0 ? (
               <div className="flex flex-col items-center justify-center border border-dashed border-border bg-[#0f0f0f]/10 p-12 text-center rounded-sm">
                 <Clock className="size-8 text-muted-foreground/35 mb-4 animate-pulse" strokeWidth={1.5} />
-                <h3 className="text-xs font-semibold text-foreground">No recent activity</h3>
+                <h3 className="text-xs font-semibold text-foreground">No recent activity yet.</h3>
                 <p className="mt-1 text-[11px] text-muted-foreground max-w-xs leading-relaxed">
-                  Activities like uploads, queries, and citation copies will appear here.
+                  Activities like uploads, queries, and annotations will appear here.
                 </p>
               </div>
             ) : (
@@ -300,29 +389,6 @@ export function Dashboard() {
                 })}
               </div>
             )}
-
-            {/* Quick Actions */}
-            <div className="mt-6 border border-border p-5 bg-[#0f0f0f]/40 rounded-sm">
-              <p className="font-mono mb-4 text-[9px] uppercase tracking-widest text-muted-foreground">
-                Quick Actions
-              </p>
-              <div className="flex flex-col gap-2">
-                {[
-                  { label: "Search inside documents", path: "/documents" },
-                  { label: "View all notes", path: "/notes" },
-                  { label: "Billing details", path: "/settings" },
-                ].map(({ label, path }) => (
-                  <Link
-                    key={label}
-                    to={path}
-                    className="flex items-center justify-between border border-border/60 px-3 py-2 text-xs text-muted-foreground hover:border-[#ff3d00]/40 hover:text-foreground hover:bg-[#ff3d00]/[0.01] transition-all duration-150 rounded-sm"
-                  >
-                    {label}
-                    <ArrowRight className="size-3 text-muted-foreground/60 group-hover:text-[#ff3d00] transition-colors" strokeWidth={1.5} />
-                  </Link>
-                ))}
-              </div>
-            </div>
           </FadeIn>
         </div>
       </Container>

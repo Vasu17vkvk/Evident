@@ -7,8 +7,9 @@ import { WorkspaceShell } from "../workspace/WorkspaceShell";
 import { DocumentService } from "../../services/document/documentService";
 import { useDocument } from "../../hooks/useDocument";
 import { useAuth } from "../../context/AuthContext";
-import { Document } from "../../types/document";
+import { Document, DocumentStatus } from "../../types/document";
 import { FadeIn, Stagger, StaggerItem } from "../layout/FadeIn";
+import { fetchActivities, addFavorite, deleteFavorite } from "../../../services/api/api";
 
 export function RecentPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -20,17 +21,55 @@ export function RecentPage() {
 
   const loadDocuments = async () => {
     try {
+      const token = localStorage.getItem("access_token");
+      let recentDocIds: string[] = [];
+      let activityDatesMap: Record<string, string> = {};
+
+      if (token) {
+        try {
+          const openActivities = await fetchActivities("open_document", 20);
+          recentDocIds = openActivities.map(act => act.documentId || act.document_id).filter(Boolean) as string[];
+          openActivities.forEach(act => {
+            const docId = act.documentId || act.document_id;
+            if (docId && !activityDatesMap[docId]) {
+              activityDatesMap[docId] = act.createdAt || act.created_at;
+            }
+          });
+        } catch (actErr) {
+          console.warn("Failed to load open_document activities from backend:", actErr);
+        }
+      }
+
       const docs = await DocumentService.sync(user?.uid);
-      // Filter: only documents with lastOpenedAt, sorted descending, limit 10
-      const recentDocs = docs
-        .filter((d) => !!d.lastOpenedAt)
-        .sort((a, b) => {
-          const dateA = a.lastOpenedAt ? new Date(a.lastOpenedAt).getTime() : 0;
-          const dateB = b.lastOpenedAt ? new Date(b.lastOpenedAt).getTime() : 0;
-          return dateB - dateA;
-        })
-        .slice(0, 10);
-      setDocuments(recentDocs);
+
+      if (recentDocIds.length > 0) {
+        // Filter and sort docs according to activities order
+        const recentDocs = docs.filter(d => recentDocIds.includes(d.id));
+        recentDocs.sort((a, b) => {
+          const indexA = recentDocIds.indexOf(a.id);
+          const indexB = recentDocIds.indexOf(b.id);
+          return indexA - indexB;
+        });
+
+        // Update documents with the activity access time if needed
+        const updatedRecentDocs = recentDocs.map(d => ({
+          ...d,
+          updatedAt: activityDatesMap[d.id] ? new Date(activityDatesMap[d.id]) : d.updatedAt
+        }));
+
+        setDocuments(updatedRecentDocs);
+      } else {
+        // Fallback to lastOpenedAt if no activities yet
+        const recentDocs = docs
+          .filter((d) => !!d.lastOpenedAt)
+          .sort((a, b) => {
+            const dateA = a.lastOpenedAt ? new Date(a.lastOpenedAt).getTime() : 0;
+            const dateB = b.lastOpenedAt ? new Date(b.lastOpenedAt).getTime() : 0;
+            return dateB - dateA;
+          })
+          .slice(0, 10);
+        setDocuments(recentDocs);
+      }
     } catch (error) {
       console.error("Failed to load documents:", error);
       toast.error("Failed to fetch recent documents.");
@@ -50,6 +89,15 @@ export function RecentPage() {
     try {
       const isFavorite = !doc.favorite;
       await DocumentService.update(doc.id, { favorite: isFavorite });
+      if (doc.mongoDbId) {
+        if (isFavorite) {
+          await addFavorite(doc.mongoDbId);
+        } else {
+          await deleteFavorite(doc.mongoDbId);
+        }
+      }
+      // Dispatch document update event so other components refresh
+      window.dispatchEvent(new CustomEvent("evident-document-update"));
       toast.success(isFavorite ? "Added to favorites" : "Removed from favorites");
       await loadDocuments();
     } catch (error) {
@@ -139,7 +187,7 @@ export function RecentPage() {
               <div className="mx-auto flex size-12 items-center justify-center border border-border bg-input/10 mb-4">
                 <Clock className="size-5 text-[#ff3d00]/60" strokeWidth={1.5} />
               </div>
-              <h3 className="text-sm font-semibold text-foreground">No recent documents</h3>
+              <h3 className="text-sm font-semibold text-foreground">No recent activity yet.</h3>
               <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
                 Documents you upload and review will appear here in chronological order of access.
               </p>

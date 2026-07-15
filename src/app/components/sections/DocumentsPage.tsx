@@ -74,14 +74,33 @@ export function DocumentsPage() {
   const handleToggleFavorite = async (e: React.MouseEvent, doc: Document) => {
     e.stopPropagation();
     e.preventDefault();
+    const originalDocs = [...documents];
+    const isFavorite = !doc.favorite;
+
+    // Optimistic UI Update: toggle the state locally immediately
+    const updatedDocs = documents.map((d) =>
+      d.id === doc.id ? { ...d, favorite: isFavorite } : d
+    );
+    setDocuments(updatedDocs);
+
     try {
-      const isFavorite = !doc.favorite;
       await DocumentService.update(doc.id, { favorite: isFavorite });
+      if (doc.mongoDbId) {
+        const { addFavorite, deleteFavorite } = await import("../../../services/api/api");
+        if (isFavorite) {
+          await addFavorite(doc.mongoDbId);
+        } else {
+          await deleteFavorite(doc.mongoDbId);
+        }
+      }
+      // Dispatch document update event so other components refresh
+      window.dispatchEvent(new CustomEvent("evident-document-update"));
       toast.success(isFavorite ? "Added to favorites" : "Removed from favorites");
-      await loadDocuments();
     } catch (error) {
       console.error("Failed to toggle favorite:", error);
       toast.error("Could not update document.");
+      // Revert state on failure
+      setDocuments(originalDocs);
     }
   };
 

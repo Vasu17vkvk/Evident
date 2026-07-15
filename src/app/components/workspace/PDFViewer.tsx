@@ -186,10 +186,10 @@ export function PDFViewer({
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-secondary min-h-[600px]">
+      <div className="flex flex-1 items-center justify-center bg-[#1a1a1a] min-h-[600px]">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="size-8 animate-spin text-[#ff3d00]" />
-          <p className="text-[11px] text-muted-foreground">Loading PDF pages…</p>
+          <p className="text-[11px] text-neutral-400">Loading PDF pages…</p>
         </div>
       </div>
     );
@@ -197,8 +197,8 @@ export function PDFViewer({
 
   if (error) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-secondary p-8 text-center min-h-[600px]">
-        <p className="text-[11px] text-muted-foreground max-w-sm leading-relaxed">{error}</p>
+      <div className="flex flex-1 items-center justify-center bg-[#1a1a1a] p-8 text-center min-h-[600px]">
+        <p className="text-[11px] text-neutral-400 max-w-sm leading-relaxed">{error}</p>
       </div>
     );
   }
@@ -207,7 +207,7 @@ export function PDFViewer({
     <div 
       ref={scrollContainerRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto bg-secondary p-6 flex flex-col items-center gap-8 scroll-smooth"
+      className="flex-1 overflow-y-auto bg-[#1a1a1a] p-6 md:p-10 flex flex-col items-center gap-6 scroll-smooth"
     >
       {Array.from({ length: pdf ? pdf.numPages : 0 }).map((_, idx) => {
         const pNum = idx + 1;
@@ -217,15 +217,18 @@ export function PDFViewer({
             ref={(el) => { pageRefs.current[pNum] = el; }}
             className="flex justify-center"
           >
-            <PDFPage
-              pdf={pdf}
-              pageNumber={pNum}
-              scale={actualScale}
-              rotation={rotation}
-              searchQuery={searchQuery}
-              searchResults={searchResults}
-              activeIndex={activeIndex}
-            />
+            {/* White paper wrapper — page content always appears on white regardless of app theme */}
+            <div className="bg-white shadow-[0_4px_32px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden">
+              <PDFPage
+                pdf={pdf}
+                pageNumber={pNum}
+                scale={actualScale}
+                rotation={rotation}
+                searchQuery={searchQuery}
+                searchResults={searchResults}
+                activeIndex={activeIndex}
+              />
+            </div>
           </div>
         );
       })}

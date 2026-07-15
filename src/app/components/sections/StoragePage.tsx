@@ -3,6 +3,7 @@ import { HardDrive, Trash2, Zap, FileText, BarChart3, AlertTriangle, ArrowRight,
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useSidebar } from "../../context/SidebarContext";
+import { useAuth } from "../../context/AuthContext";
 import { WorkspaceShell } from "../workspace/WorkspaceShell";
 import { DocumentService } from "../../services/document/documentService";
 import { Document } from "../../types/document";
@@ -13,10 +14,11 @@ export function StoragePage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { toggle: toggleSidebar } = useSidebar();
+  const { user } = useAuth();
 
   const loadDocuments = async () => {
     try {
-      const docs = await DocumentService.sync(user?.uid);
+      const docs = await DocumentService.sync(user?.uid ?? undefined);
       setDocuments(docs);
     } catch (e) {
       console.error(e);
@@ -27,7 +29,7 @@ export function StoragePage() {
 
   useEffect(() => {
     loadDocuments();
-  }, [user]);
+  }, [user?.uid]);
 
   const handleDelete = async (docId: string) => {
     if (!confirm("Are you sure you want to delete this document to free up space?")) return;

@@ -1,11 +1,37 @@
 import { DocumentStatistics, DocumentContent } from "../../types/document";
 
+/** Strip HTML tags for statistics derivation when fullText is empty */
+function stripHtmlForStats(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 export class StatisticsService {
   static calculateStatistics(content?: DocumentContent): DocumentStatistics {
-    const fullText = content?.fullText || "";
+    console.log(`[Pipeline] Statistics generation start — pages: ${content?.textPages?.length ?? 0}, fullText length: ${content?.fullText?.length ?? 0}`);
+
+    let fullText = content?.fullText || "";
     const textPages = content?.textPages || [];
     const paragraphs = content?.paragraphs || [];
     const sections = content?.sections || [];
+
+    // If fullText is empty but textPages exist (e.g. DOCX with HTML-only pages),
+    // derive plain text by stripping HTML — prevents all statistics from being 0.
+    if (!fullText.trim() && textPages.length > 0) {
+      fullText = textPages.map(stripHtmlForStats).join("\n").trim();
+      console.log("[Pipeline] Statistics: fullText was empty — derived from textPages HTML strip.");
+    }
 
     // Words: split on whitespace and filter non-empty
     const words = fullText.split(/\s+/).filter(Boolean);
@@ -43,7 +69,7 @@ export class StatisticsService {
     // Images: we don't have access to actual images, so this will be 0 for now
     const images = 0;
 
-    return {
+    const result: DocumentStatistics = {
       words: wordCount,
       characters: fullText.length,
       paragraphs: paragraphs.length,
@@ -55,5 +81,11 @@ export class StatisticsService {
       averageSentenceLength,
       readingTime
     };
+
+    console.log(
+      `[Pipeline] Statistics generation complete — words: ${wordCount}, sentences: ${sentenceCount}, paragraphs: ${paragraphs.length}, readingTime: ${readingTime}min`
+    );
+
+    return result;
   }
 }

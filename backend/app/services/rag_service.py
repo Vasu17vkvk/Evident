@@ -33,19 +33,25 @@ class RAGService:
     @staticmethod
     def get_embedding(text: str, is_query: bool = False) -> list[float]:
         """
-        Generate embedding using Gemini gemini-embedding-001.
+        Generate embedding using Gemini gemini-embedding-001 with exponential backoff retries.
         """
-        try:
-            task_type = "retrieval_query" if is_query else "retrieval_document"
-            response = genai.embed_content(
-                model="models/gemini-embedding-001",
-                content=text,
-                task_type=task_type
-            )
-            return response["embedding"]
-        except Exception as e:
-            logger.error(f"[RAGService] Failed to generate embedding: {e}")
-            raise
+        import time
+        max_retries = 3
+        backoff_factor = 2
+        for attempt in range(max_retries):
+            try:
+                task_type = "retrieval_query" if is_query else "retrieval_document"
+                response = genai.embed_content(
+                    model="models/gemini-embedding-001",
+                    content=text,
+                    task_type=task_type
+                )
+                return response["embedding"]
+            except Exception as e:
+                logger.warning(f"[RAGService] Failed to generate embedding (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(backoff_factor ** attempt)
 
     @staticmethod
     async def chunk_document(document_id: str, pages_content: list[str], user_id: str = None) -> bool:
@@ -55,8 +61,11 @@ class RAGService:
         try:
             logger.info(f"[RAGService] Starting chunking process for document: {document_id}")
             
-            # 1. Clear existing chunks to prevent duplicates
-            await db.db["document_chunks"].delete_many({"documentId": document_id})
+            # 1. Clear existing chunks to prevent duplicates — scoped to this user+document pair
+            delete_filter = {"documentId": document_id}
+            if user_id:
+                delete_filter["userId"] = user_id
+            await db.db["document_chunks"].delete_many(delete_filter)
             
             if not pages_content:
                 logger.warning(f"[RAGService] No pagesContent found for document {document_id}")
@@ -106,7 +115,7 @@ class RAGService:
         return dot_product / (norm_v1 * norm_v2)
 
     @staticmethod
-    async def retrieve_context(document_id: str, query: str, limit: int = 5) -> list[dict]:
+    async def retrieve_context(document_id: str, query: str, limit: int = 5, user_id: str = None) -> list[dict]:
         """
         Retrieves the top N most relevant document chunks based on semantic similarity.
         """
@@ -116,8 +125,11 @@ class RAGService:
             # Generate vector embedding for the query
             query_vector = RAGService.get_embedding(query, is_query=True)
             
-            # Fetch all cached chunks for the document
-            chunks = await db.db["document_chunks"].find({"documentId": document_id}).to_list(None)
+            # Fetch all cached chunks for this user's document only
+            chunks_filter = {"documentId": document_id}
+            if user_id:
+                chunks_filter["userId"] = user_id
+            chunks = await db.db["document_chunks"].find(chunks_filter).to_list(None)
             if not chunks:
                 logger.warning(f"[RAGService] No chunks found for document {document_id}")
                 return []

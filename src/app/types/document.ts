@@ -152,6 +152,7 @@ export interface Document {
   mongoDbId?: string;
   favorite?: boolean;
   lastOpenedAt?: string;
+  isNewUpload?: boolean;
 }
 
 export type CreateDocumentInput = Partial<Omit<

@@ -15,15 +15,23 @@ import {
   Zap,
   HardDrive,
   FolderOpen,
+  LayoutDashboard,
 } from "lucide-react";
 
 /* ── Navigation items ─────────────────────────── */
 const NAV_ITEMS = [
   {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    path: "/dashboard",
+    count: null,
+  },
+  {
     id: "documents",
     label: "Documents",
     icon: FileText,
-    path: "/documents",
+    path: "/workspace",
     count: 24,
   },
   {
@@ -217,6 +225,9 @@ export function WorkspaceSidebar({ activeId }: Props) {
   const { isOpen, setOpen } = useSidebar();
   const { user } = useAuth();
   const onClose = () => setOpen(false);
+  const handleNavSelect = () => {
+    setOpen(false);
+  };
 
   const [counts, setCounts] = useState({
     documents: 0,
@@ -272,15 +283,25 @@ export function WorkspaceSidebar({ activeId }: Props) {
   /* Determine active nav item */
   const getIsActive = (item: { id: string; path: string }) => {
     if (activeId) return item.id === activeId;
+    
+    // Strict match
     if (location.pathname === item.path) return true;
-    if (item.id === "documents" && (location.pathname === "/dashboard" || location.pathname === "/documents")) return true;
-    if (item.id === "settings" && (location.pathname.startsWith("/account") || location.pathname.startsWith("/settings"))) return true;
+    
+    // Scopes for /workspace matching to Documents
+    if (item.id === "documents" && location.pathname.startsWith("/workspace")) return true;
+    
+    // Settings matches /settings or /account
+    if (item.id === "settings" && (location.pathname.startsWith("/settings") || location.pathname.startsWith("/account"))) return true;
+    
+    // Other items matching by prefix (excluding root/empty paths)
+    if (item.path !== "/" && location.pathname.startsWith(item.path)) return true;
+    
     return false;
   };
 
   const dynamicNavItems = NAV_ITEMS.map((item) => ({
     ...item,
-    count: counts[item.id as keyof typeof counts] ?? 0,
+    count: item.count === null ? null : (counts[item.id as keyof typeof counts] ?? 0),
   }));
 
   return (
@@ -335,7 +356,7 @@ export function WorkspaceSidebar({ activeId }: Props) {
               {/* Primary nav items */}
               <div className="flex flex-col mt-2">
                 {dynamicNavItems.map((item) => (
-                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={onClose} />
+                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={handleNavSelect} />
                 ))}
               </div>
 
@@ -345,13 +366,13 @@ export function WorkspaceSidebar({ activeId }: Props) {
               {/* Bottom nav items (Settings, etc.) */}
               <div className="flex flex-col">
                 {BOTTOM_ITEMS.map((item) => (
-                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={onClose} />
+                  <NavItem key={item.id} item={item} isActive={getIsActive(item)} onSelect={handleNavSelect} />
                 ))}
               </div>
             </nav>
 
             {/* Storage card (bottom) */}
-            <div className="shrink-0 border-t border-[#262626] p-4" onClick={onClose}>
+            <div className="shrink-0 border-t border-[#262626] p-4" onClick={handleNavSelect}>
               <StorageCard />
             </div>
           </motion.aside>

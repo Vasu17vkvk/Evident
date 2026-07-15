@@ -142,6 +142,13 @@ export function NotesPage() {
 
     const token = localStorage.getItem("access_token");
 
+    // Map local documentId to MongoDB ObjectID for cloud sync calls
+    let backendDocId: string | undefined = undefined;
+    if (currentNote.documentId) {
+      const matchedDoc = documents.find((d) => d.id === currentNote.documentId);
+      backendDocId = matchedDoc?.mongoDbId || currentNote.documentId;
+    }
+
     if (currentNote.id) {
       // Editing existing note
       if (token) {
@@ -149,7 +156,7 @@ export function NotesPage() {
           await updatePersistedNote(currentNote.id, {
             title: currentNote.title,
             content: currentNote.content,
-            documentId: currentNote.documentId || undefined,
+            documentId: backendDocId || undefined,
             pageNumber: currentNote.pageNumber || undefined,
           });
         } catch (err) {
@@ -177,7 +184,7 @@ export function NotesPage() {
           const res = await createPersistedNote({
             title: currentNote.title,
             content: currentNote.content || "",
-            documentId: currentNote.documentId || undefined,
+            documentId: backendDocId || undefined,
             pageNumber: currentNote.pageNumber || undefined,
           });
           noteId = res.noteId;
@@ -210,7 +217,14 @@ export function NotesPage() {
   const handleLinkClick = async (e: React.MouseEvent, docId: string, pageNumber?: number) => {
     e.stopPropagation();
     e.preventDefault();
-    const doc = documents.find((d) => d.id === docId);
+    let doc = documents.find((d) => d.id === docId);
+    if (!doc) {
+      try {
+        doc = await DocumentService.get(docId);
+      } catch (err) {
+        console.error("Failed to load document from IndexedDB:", err);
+      }
+    }
     if (doc) {
       await selectDocument(doc);
       navigate(`/workspace/${encodeURIComponent(doc.id)}?page=${pageNumber || 1}`);
@@ -414,11 +428,13 @@ export function NotesPage() {
               <div className="mx-auto flex size-12 items-center justify-center border border-border bg-input/10 mb-4">
                 <StickyNote className="size-5 text-[#ff3d00]/60" strokeWidth={1.5} />
               </div>
-              <h3 className="text-sm font-semibold text-foreground">No notes found</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                {searchQuery ? "No notes found" : "No notes yet."}
+              </h3>
               <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
                 {searchQuery
                   ? `No notes match your search term "${searchQuery}".`
-                  : "Save summaries, annotations, or RAG insights in one central place. Link them back to document contexts."}
+                  : "Save important information while reading documents."}
               </p>
               {!searchQuery && (
                 <button

@@ -68,6 +68,32 @@ export function DocumentViewer({
       ? document.status !== DocumentStatus.Ready && !document.content?.fullText && !document.pagesContent?.length
       : false;
 
+  const [canvasTotalPages, setCanvasTotalPages] = useState<number | null>(null);
+
+  const getTextTotalPages = () => {
+    return document?.content?.textPages?.length || document?.pagesContent?.length || 1;
+  };
+
+  const getCanvasTotalPages = () => {
+    if (document?.extension === "pdf") {
+      return document?.pages || 1;
+    }
+    if (document?.extension === "docx") {
+      return canvasTotalPages || 1;
+    }
+    return document?.pagesContent?.length || document?.pages || 1;
+  };
+
+  const totalPages = currentView === "text" ? getTextTotalPages() : getCanvasTotalPages();
+
+  const handleViewChange = (view: "pdf" | "text") => {
+    onViewChange(view);
+    const targetTotal = view === "text" ? getTextTotalPages() : getCanvasTotalPages();
+    if (currentPage > targetTotal) {
+      onPageChange(targetTotal);
+    }
+  };
+
   // Emergency fallback: allow user to enter workspace even if processing takes too long.
   // If document.status !== Ready for more than 10 seconds, disable AI/Insights/Search but keep PDF viewer + navigation.
   const [processingFallback, setProcessingFallback] = useState(false);
@@ -115,12 +141,22 @@ export function DocumentViewer({
       return;
     }
 
-    // Start a timer only when we are not Ready.
-    if (!processingTimeoutTimerRef.current) {
-      processingTimeoutTimerRef.current = setTimeout(() => {
-        setProcessingFallback(true);
-      }, 10_000);
+    // Reset the fallback timer each time the status changes so we give each
+    // pipeline stage its own full window before enabling the fallback overlay.
+    // Previously this used a guard (`if (!processingTimeoutTimerRef.current)`)
+    // that prevented the timer from resetting on stage transitions, causing
+    // the overlay to be dismissed after only 10s total regardless of progress.
+    if (processingTimeoutTimerRef.current) {
+      clearTimeout(processingTimeoutTimerRef.current);
+      processingTimeoutTimerRef.current = null;
     }
+
+    processingTimeoutTimerRef.current = setTimeout(() => {
+      // Only enable fallback if still in a non-Ready, non-Error processing state
+      const liveStatus = processingTimeoutTimerRef.current !== null;
+      console.log(`[Document State] ProcessingFallback activated — document has been in processing state for ${60}s without reaching Ready.`);
+      setProcessingFallback(true);
+    }, 60_000);
 
     return () => {
       if (processingTimeoutTimerRef.current) {
@@ -305,26 +341,26 @@ export function DocumentViewer({
                 {/* Vertical Divider after Menu */}
                 <div className="hidden lg:block h-4 w-px bg-border mx-1" />
 
-                {document.extension === "pdf" && (
+                {(document.extension === "pdf" || document.extension === "docx" || document.extension === "txt") && (
                   <>
                     <div className="flex border border-border bg-card p-0.5 rounded-sm mr-1 sm:mr-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => onViewChange("pdf")}
+                        onClick={() => handleViewChange("pdf")}
                         className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "pdf" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
                       >
-                        PDF
+                        Canvas
                       </button>
                       <button
                         type="button"
-                        onClick={() => onViewChange("text")}
+                        onClick={() => handleViewChange("text")}
                         className={`px-1.5 sm:px-2 py-0.5 font-mono text-[7px] sm:text-[8px] uppercase tracking-wider rounded-sm transition-colors ${currentView === "text" ? "bg-[#ff3d00] text-[#0a0a0a] font-semibold" : "text-muted-foreground hover:text-foreground"}`}
                       >
                         Text
                       </button>
                     </div>
 
-                    {/* Vertical Divider after PDF/TEXT toggle */}
+                    {/* Vertical Divider after view toggle */}
                     <div className="hidden lg:block h-4 w-px bg-border mx-1" />
                   </>
                 )}
@@ -351,14 +387,14 @@ export function DocumentViewer({
                   </span>
                   <span className="font-mono text-[10px] text-muted-foreground/60">/</span>
                   <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                    {Math.max(document?.pages || 1, document?.pagesContent?.length || 1)}
+                    {totalPages}
                   </span>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => handleToolbarPageChange(Math.min(document?.pages || 1, currentPage + 1))}
-                  disabled={currentPage >= Math.max(document?.pages || 1, document?.pagesContent?.length || 1)}
+                  onClick={() => handleToolbarPageChange(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage >= totalPages}
                   className="flex size-7 sm:size-8 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-25 transition-colors"
                 >
                   <ChevronRight className="size-3.5" strokeWidth={2} />
@@ -487,6 +523,7 @@ export function DocumentViewer({
                 toast.error("PDF canvas preview failed. Automatically switched to Text Reader view.");
                 onViewChange("text");
               }}
+              onTotalPagesDetected={setCanvasTotalPages}
             />
           </>
         )

@@ -36,13 +36,15 @@ export interface ChatStreamCallbacks {
     onError: (error: unknown) => void;
 }
 
+export interface ChatCitation {
+    text: string;
+    page?: number;
+    confidence?: number;
+}
+
 export interface ChatResponse {
     answer: string;
-    citations: Array<{
-        text: string;
-        page?: number;
-        confidence?: number;
-    }>;
+    citations: ChatCitation[];
 }
 
 // ---------------------------------------------------------------------------
@@ -101,16 +103,51 @@ export const streamQuestion = async (
     }
 };
 
+// ---------------------------------------------------------------------------
+// Persistent chat history
+// ---------------------------------------------------------------------------
+
 export interface ChatMessageResponse {
   role: "user" | "assistant";
   content: string;
+  /** ISO-8601 timestamp string */
   timestamp: string;
   model?: string;
   tokenUsage?: number;
-  citations?: Array<{ text: string; page?: number; confidence?: number }>;
+  /** Citations returned with assistant messages */
+  citations?: ChatCitation[];
 }
 
+/** Fetch all messages for the current user's session on a document. */
 export const fetchChatHistory = async (documentId: string): Promise<ChatMessageResponse[]> => {
   const response = await api.get(`/chat/${documentId}`);
+  return response.data;
+};
+
+// ---------------------------------------------------------------------------
+// Session management
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete a chat session and all its messages.
+ * The server returns 403 if the session belongs to another user.
+ */
+export const deleteChatSession = async (sessionId: string): Promise<void> => {
+  await api.delete(`/chat/session/${sessionId}`);
+};
+
+/**
+ * Fetch session metadata (including sessionId) for a document.
+ * Creates a new session if none exists yet.
+ */
+export interface ChatSessionInfo {
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const fetchChatSession = async (documentId: string): Promise<ChatSessionInfo> => {
+  const response = await api.get(`/chat/session/info/${documentId}`);
   return response.data;
 };

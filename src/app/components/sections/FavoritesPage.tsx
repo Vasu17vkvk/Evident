@@ -7,8 +7,9 @@ import { WorkspaceShell } from "../workspace/WorkspaceShell";
 import { DocumentService } from "../../services/document/documentService";
 import { useDocument } from "../../hooks/useDocument";
 import { useAuth } from "../../context/AuthContext";
-import { Document } from "../../types/document";
+import { Document, DocumentStatus } from "../../types/document";
 import { FadeIn, Stagger, StaggerItem } from "../layout/FadeIn";
+import { fetchFavorites, addFavorite, deleteFavorite } from "../../../services/api/api";
 
 export function FavoritesPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -20,6 +21,27 @@ export function FavoritesPage() {
 
   const loadDocuments = async () => {
     try {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        const cloudFavs = await fetchFavorites();
+        const formatted: Document[] = cloudFavs.map(doc => ({
+          id: doc.documentId,
+          name: doc.filename,
+          url: doc.fileUrl || "",
+          viewerUrl: doc.viewerUrl || "",
+          size: doc.fileSize,
+          pages: doc.pageCount,
+          type: doc.mimeType || "application/pdf",
+          status: (doc.status as DocumentStatus) || DocumentStatus.Ready,
+          extension: doc.filename.split('.').pop() || "",
+          favorite: true,
+          createdAt: new Date(doc.uploadDate),
+          updatedAt: new Date(doc.uploadDate)
+        }));
+        setDocuments(formatted);
+        return;
+      }
+
       const docs = await DocumentService.sync(user?.uid);
       const favDocs = docs.filter((d: any) => !!d.favorite);
       // Sort newer first
@@ -41,14 +63,31 @@ export function FavoritesPage() {
   const handleToggleFavorite = async (e: React.MouseEvent, doc: Document) => {
     e.stopPropagation();
     e.preventDefault();
+    
+    const originalDocs = [...documents];
+    const isFavorite = !doc.favorite;
+
+    // Optimistic UI Update: remove from list immediately on FavoritesPage
+    const updatedDocs = documents.filter((d) => d.id !== doc.id);
+    setDocuments(updatedDocs);
+
     try {
-      const isFavorite = !doc.favorite;
       await DocumentService.update(doc.id, { favorite: isFavorite });
+      if (doc.mongoDbId) {
+        if (isFavorite) {
+          await addFavorite(doc.mongoDbId);
+        } else {
+          await deleteFavorite(doc.mongoDbId);
+        }
+      }
+      // Dispatch document update event so other components refresh
+      window.dispatchEvent(new CustomEvent("evident-document-update"));
       toast.success(isFavorite ? "Added to favorites" : "Removed from favorites");
-      await loadDocuments();
     } catch (error) {
       console.error("Failed to toggle favorite:", error);
       toast.error("Could not update favorites.");
+      // Revert state on failure
+      setDocuments(originalDocs);
     }
   };
 
@@ -119,7 +158,7 @@ export function FavoritesPage() {
               <div className="mx-auto flex size-12 items-center justify-center border border-border bg-input/10 mb-4">
                 <Star className="size-5 text-[#ff3d00]/40" strokeWidth={1.5} />
               </div>
-              <h3 className="text-sm font-semibold text-foreground">No favorited documents</h3>
+              <h3 className="text-sm font-semibold text-foreground">No favorite documents yet.</h3>
               <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
                 Pin important documents here by clicking the star icon in your document list or viewer.
               </p>

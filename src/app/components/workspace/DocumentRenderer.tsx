@@ -14,6 +14,7 @@ interface Props {
   searchResults?: any[];
   activeIndex?: number | null;
   onRenderFailed?: () => void;
+  onTotalPagesDetected?: (pages: number) => void;
 }
 
 export function DocumentRenderer({
@@ -27,12 +28,32 @@ export function DocumentRenderer({
   searchResults = [],
   activeIndex = null,
   onRenderFailed,
+  onTotalPagesDetected,
 }: Props) {
-  const extension = doc.extension?.toLowerCase() || "";
+  const extension = doc.extension?.toLowerCase() || doc.name?.split(".").pop()?.toLowerCase() || "";
   const type = doc.type?.toLowerCase() || "";
 
-  // If currentView is set to "text", or if the file extension is plain text
-  if (currentView === "text" || extension === "txt" || type.includes("text/plain")) {
+  // If currentView is set to "text" (raw plain text mode)
+  if (currentView === "text") {
+    if (
+      extension === "docx" ||
+      type.includes("wordprocessingml") ||
+      type.includes("application/msword") ||
+      type.includes("docx")
+    ) {
+      return (
+        <DOCXDocumentRenderer
+          document={doc}
+          currentPage={currentPage}
+          onPageChange={onPageChange}
+          scale={scale}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          activeIndex={activeIndex}
+          textMode={true}
+        />
+      );
+    }
     return (
       <TXTDocumentRenderer
         document={doc}
@@ -42,6 +63,7 @@ export function DocumentRenderer({
         searchQuery={searchQuery}
         searchResults={searchResults}
         activeIndex={activeIndex}
+        forcePlain={true}
       />
     );
   }
@@ -62,6 +84,24 @@ export function DocumentRenderer({
         searchQuery={searchQuery}
         searchResults={searchResults}
         activeIndex={activeIndex}
+        textMode={false}
+        onTotalPagesDetected={onTotalPagesDetected}
+      />
+    );
+  }
+
+  // If document is Plain Text format
+  if (extension === "txt" || type.includes("text/plain")) {
+    return (
+      <TXTDocumentRenderer
+        document={doc}
+        currentPage={currentPage}
+        onPageChange={onPageChange}
+        scale={scale}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        activeIndex={activeIndex}
+        forcePlain={false}
       />
     );
   }

@@ -209,9 +209,10 @@ export function InsightsPanel({
         const mappedInsights: DocumentInsights = {
           executiveSummary: realInsights.executiveSummary,
           documentPurpose: realInsights.documentPurpose,
+          readingDifficulty: document.pages && document.pages > 10 ? "Advanced" : "Intermediate",
           readingTime: document.metadata?.estimatedReadingTime ? `${document.metadata.estimatedReadingTime} min` : "0 min",
           tone: "Professional",
-          facts: realInsights.facts || [],
+          facts: (realInsights.facts || []).map((f: any, idx: number) => ({ id: idx + 1, ...f })),
           entities: {
             people: realInsights.entities?.people || [],
             organizations: realInsights.entities?.organizations || [],
@@ -244,7 +245,18 @@ export function InsightsPanel({
         document.statistics
       );
 
-      const currentInsights = document.insights || {};
+      const currentInsights = document.insights || {
+        executiveSummary: "",
+        documentPurpose: "",
+        readingDifficulty: "Intermediate",
+        keyTopics: [],
+        readingTime: "0 min",
+        tone: "",
+        facts: [],
+        entities: { people: [], organizations: [], locations: [] },
+        timeline: [],
+        statistics: [],
+      };
       let updatedInsights = { ...currentInsights };
 
       if (tab === "Summary") {

@@ -27,7 +27,6 @@ export function WorkspaceShell({
   documentName,
   searchQuery,
   onSearchChange,
-  onSidebarToggle, // Ignored here as we override it with custom toggle logic
   onCopilotToggle,
   onInsightsToggle,
   searchResultsCount,

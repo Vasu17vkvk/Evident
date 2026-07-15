@@ -13,6 +13,23 @@ export class ParserService {
     return parts.length > 1 ? parts.pop()!.toLowerCase() : "";
   }
 
+  /** Strip HTML tags from a string to produce plain text */
+  private static stripHtml(html: string): string {
+    return html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/div>/gi, "\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+  }
+
   static async extractPDFText(file: File): Promise<string[]> {
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -50,12 +67,14 @@ export class ParserService {
       ]);
       
       const html = htmlResult.value;
-      const plainText = rawTextResult.value || "";
+      // Use rawText from mammoth; fall back to stripping HTML tags if rawText is empty
+      // (some DOCX files produce empty rawText but valid HTML via mammoth)
+      let plainText = rawTextResult.value || "";
       
       // Split HTML into "pages" (simulate by chunks, since DOCX doesn't have native pages)
       const htmlPages: string[] = [];
-      // Split on paragraphs or headings to make better page breaks
-      const chunks = html.split(/(?=<p>|<h[1-6]>)/i);
+      // Split on paragraphs or headings (including those with attributes e.g. <h1 class="...">)
+      const chunks = html.split(/(?=<p[ >]|<h[1-6][ >])/i);
       let currentPage = "";
       const maxCharsPerPage = 2000;
 
@@ -72,8 +91,19 @@ export class ParserService {
         htmlPages.push(currentPage);
       }
 
+      const finalHtmlPages = htmlPages.length > 0 ? htmlPages : ["Document has no readable text content"];
+
+      // If mammoth returned empty rawText, derive plainText by stripping HTML tags from all pages
+      if (!plainText.trim()) {
+        plainText = finalHtmlPages
+          .map((page) => this.stripHtml(page))
+          .join("\n")
+          .trim();
+        console.log("[Pipeline] DOCX: mammoth rawText was empty — derived plainText from HTML pages.");
+      }
+
       return {
-        htmlPages: htmlPages.length > 0 ? htmlPages : ["Document has no readable text content"],
+        htmlPages: finalHtmlPages,
         plainText
       };
     } catch (err) {
@@ -133,6 +163,15 @@ export class ParserService {
       fullText = "";
     }
 
+    // For DOCX: if fullText is still empty after extraction, strip HTML from textPages as last resort
+    if (!fullText.trim() && extension === "docx" && textPages.length > 0) {
+      fullText = textPages
+        .map((page) => this.stripHtml(page))
+        .join("\n")
+        .trim();
+      console.log("[Pipeline] DOCX: derived fullText from HTML page stripping at parseFile level.");
+    }
+
     const paragraphs = fullText.split(/\n\s*\n/).filter(Boolean);
     // Extract headings (simple heuristic: lines starting with #, or all caps)
     const sections = paragraphs.filter(p => 
@@ -140,11 +179,17 @@ export class ParserService {
       (p === p.toUpperCase() && p.length > 0 && p.length < 100)
     );
 
-    return {
+    const result: DocumentContent = {
       textPages: textPages.length > 0 ? textPages : ["Failed to process document"],
       fullText: fullText || "",
       paragraphs: paragraphs.length > 0 ? paragraphs : [],
       sections: sections.length > 0 ? sections : []
     };
+
+    console.log(
+      `[Pipeline] Content extraction complete — extension: ${extension}, pages: ${result.textPages?.length ?? 0}, fullText length: ${result.fullText?.length ?? 0}, paragraphs: ${result.paragraphs?.length ?? 0}`
+    );
+
+    return result;
   }
 }

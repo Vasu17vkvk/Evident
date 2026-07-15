@@ -68,6 +68,8 @@ export interface DocumentUpdateRequest {
   pages?: number;
   wordCount?: number;
   pagesContent?: string[];
+  favorite?: boolean;
+  lastOpenedAt?: string;
 }
 
 export const updatePersistedDocument = async (
@@ -100,6 +102,11 @@ export interface InsightsResponse {
   }>;
   generationTimestamp: string;
   modelUsed: string;
+  keyPoints?: string[];
+  actionItems?: string[];
+  questions?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const fetchInsights = async (
@@ -109,6 +116,21 @@ export const fetchInsights = async (
   const url = model ? `/insights/${documentId}?model=${model}` : `/insights/${documentId}`;
   const response = await api.get(url);
   return response.data;
+};
+
+export const regenerateInsights = async (
+  documentId: string,
+  model?: string
+): Promise<InsightsResponse> => {
+  const url = model ? `/insights/${documentId}?model=${model}` : `/insights/${documentId}`;
+  const response = await api.post(url);
+  return response.data;
+};
+
+export const deleteInsights = async (
+  documentId: string
+): Promise<void> => {
+  await api.delete(`/insights/${documentId}`);
 };
 
 export interface DocumentLibraryResponse {
@@ -160,6 +182,8 @@ export interface NoteResponse {
   documentId?: string;
   documentName?: string;
   pageNumber?: number;
+  sourceText?: string;
+  source_text?: string;
   createdAt: string;
   updatedAt: string;
   userId: string;
@@ -169,14 +193,22 @@ export interface NoteCreateRequest {
   title: string;
   content: string;
   documentId?: string;
+  document_id?: string;
   pageNumber?: number;
+  page_number?: number;
+  sourceText?: string;
+  source_text?: string;
 }
 
 export interface NoteUpdateRequest {
   title?: string;
   content?: string;
   documentId?: string;
+  document_id?: string;
   pageNumber?: number;
+  page_number?: number;
+  sourceText?: string;
+  source_text?: string;
 }
 
 export const fetchNotes = async (): Promise<NoteResponse[]> => {
@@ -208,9 +240,8 @@ export const fetchDocumentDownloadUrl = async (documentId: string): Promise<{ do
 
 export interface DashboardStats {
   documentsUploaded: number;
-  totalQueries: number;
-  citationsGenerated: number;
-  avgResponseTime: number;
+  favoriteCount: number;
+  recentCount: number;
 }
 
 export interface DashboardRecentDocument {
@@ -244,6 +275,25 @@ export const fetchDashboardRecentDocuments = async (): Promise<DashboardRecentDo
   return response.data;
 };
 
+export interface UnifiedDashboardResponse {
+  stats: {
+    documents: number;
+    recent: number;
+    favorites: number;
+    notes: number;
+    storage_used_mb: number;
+  };
+  recent_documents: DashboardRecentDocument[];
+  favorite_documents: DashboardRecentDocument[];
+  recent_notes: any[];
+  activities: DashboardActivity[];
+}
+
+export const fetchUnifiedDashboard = async (): Promise<UnifiedDashboardResponse> => {
+  const response = await api.get("/dashboard");
+  return response.data;
+};
+
 export const fetchDashboardRecentActivity = async (): Promise<DashboardActivity[]> => {
   const response = await api.get("/dashboard/recent-activity");
   return response.data;
@@ -251,4 +301,29 @@ export const fetchDashboardRecentActivity = async (): Promise<DashboardActivity[
 
 export const trackCitationCopy = async (documentId: string): Promise<void> => {
   await api.post(`/documents/${documentId}/citation`);
+};
+
+export const fetchFavorites = async (): Promise<any[]> => {
+  const response = await api.get("/favorites");
+  return response.data;
+};
+
+export const addFavorite = async (documentId: string): Promise<void> => {
+  await api.post(`/favorites/${documentId}`);
+};
+
+export const deleteFavorite = async (documentId: string): Promise<void> => {
+  await api.delete(`/favorites/${documentId}`);
+};
+
+export const fetchActivities = async (type?: string, limit?: number): Promise<any[]> => {
+  let url = "/activities";
+  const params = [];
+  if (type) params.push(`type=${type}`);
+  if (limit) params.push(`limit=${limit}`);
+  if (params.length > 0) {
+    url += "?" + params.join("&");
+  }
+  const response = await api.get(url);
+  return response.data;
 };

@@ -1,5 +1,6 @@
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
+from datetime import datetime
 
 
 # ---------------------------------------------------------------------------
@@ -71,14 +72,15 @@ class ChatResponse(BaseModel):
 # Persistent Chat Schemas
 # ---------------------------------------------------------------------------
 
-from datetime import datetime
-
 class ChatMessageResponse(BaseModel):
+    """Flat message returned from GET /chat/{documentId} — backward-compatible."""
     role: str
     content: str
     timestamp: datetime
     model: str | None = None
     tokenUsage: int | None = 0
+    citations: Optional[list[Citation]] = None
+
 
 class PersistedChatRequest(BaseModel):
     question: str
@@ -87,3 +89,30 @@ class PersistedChatRequest(BaseModel):
     conversationHistory: list[ConversationTurn] = []
 
 
+# ---------------------------------------------------------------------------
+# New Session-Based Schemas
+# ---------------------------------------------------------------------------
+
+class ChatSessionResponse(BaseModel):
+    """Metadata for a chat session."""
+    sessionId: str
+    documentId: str
+    userId: str
+    title: str
+    createdAt: datetime
+    updatedAt: datetime
+    messageCount: int = 0
+
+
+class ChatMessageRecord(BaseModel):
+    """Full message record from chat_messages collection."""
+    messageId: str
+    sessionId: str
+    userId: str
+    documentId: str
+    role: str
+    content: str
+    citations: Optional[list[Citation]] = None
+    createdAt: datetime
+    model: str | None = None
+    tokenUsage: int | None = 0

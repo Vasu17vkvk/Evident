@@ -1,9 +1,36 @@
 import { DocumentMetadata, DocumentContent } from "../../types/document";
 
+/** Strip HTML tags — mirrors the helper in parserService for safe word-counting */
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 export class MetadataService {
   static extractMetadata(fileName: string, fileSize: number, fileType: string, content?: DocumentContent): DocumentMetadata {
+    console.log(`[Pipeline] Metadata extraction start — file: ${fileName}, fileType: ${fileType}, pages: ${content?.textPages?.length ?? 0}`);
+
     const pageCount = content?.textPages?.length || 0;
-    const fullText = content?.fullText || "";
+    let fullText = content?.fullText || "";
+
+    // If fullText is empty but textPages exist (e.g. DOCX with HTML-only pages),
+    // derive plain text by stripping HTML tags — prevents wordCount from being 0.
+    if (!fullText.trim() && content?.textPages && content.textPages.length > 0) {
+      fullText = content.textPages.map(stripHtmlTags).join("\n").trim();
+      console.log("[Pipeline] Metadata: fullText was empty — derived from textPages HTML strip.");
+    }
+
     const words = fullText.split(/\s+/).filter(Boolean);
     const wordCount = words.length;
     const characterCount = fullText.length;
@@ -38,7 +65,7 @@ export class MetadataService {
       }
     }
 
-    return {
+    const result: DocumentMetadata = {
       title,
       author: "Unknown",
       language,
@@ -51,5 +78,11 @@ export class MetadataService {
       fileType,
       fileSize
     };
+
+    console.log(
+      `[Pipeline] Metadata extraction complete — wordCount: ${wordCount}, characterCount: ${characterCount}, category: ${documentCategory}, readingTime: ${estimatedReadingTime}min`
+    );
+
+    return result;
   }
 }

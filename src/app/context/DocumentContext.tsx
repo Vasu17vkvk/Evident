@@ -20,9 +20,11 @@ import { StatisticsService } from "../services/document/statisticsService";
 import { DocumentValidatorService } from "../services/document/documentValidatorService";
 import { pipelineDebugger } from "../services/debug/pipelineDebugger";
 import { requestUploadUrl, persistDocument, updatePersistedDocument, api, fetchDocumentDownloadUrl } from "../../services/api/api";
+import { toast } from "sonner";
 
-// Timeout duration for processing states (15 seconds)
-const PROCESSING_TIMEOUT_MS = 15000;
+// Timeout duration for processing states (60 seconds)
+// This is a per-stage timeout — it resets whenever the pipeline advances to a new stage.
+const PROCESSING_TIMEOUT_MS = 60000;
 
 // Processing states that should have timeout protection
 const PROCESSING_STATES = [
@@ -31,6 +33,69 @@ const PROCESSING_STATES = [
   DocumentStatus.ExtractingMetadata,
   DocumentStatus.GeneratingStatistics,
 ];
+
+// Monotonic state transition order — used by isValidTransition()
+const STATE_ORDER: DocumentStatus[] = [
+  DocumentStatus.Uploading,
+  DocumentStatus.Parsing,
+  DocumentStatus.ExtractingMetadata,
+  DocumentStatus.GeneratingStatistics,
+  DocumentStatus.Ready,
+];
+
+/**
+ * Returns true if transitioning from `from` → `to` is allowed by the state machine.
+ *
+ * Allowed forward transitions:
+ *   null        → Uploading
+ *   Uploading   → Parsing
+ *   Parsing     → ExtractingMetadata
+ *   ExtractingMetadata → GeneratingStatistics
+ *   GeneratingStatistics → Ready
+ *   any processing state → Error   (failure path)
+ *
+ * Blocked transitions (monotonic / terminal rules):
+ *   Error  → Ready  (never recover from error without explicit retry)
+ *   Ready  → Error  (Ready is a terminal success state)
+ *   Ready  → any processing state
+ */
+function isValidTransition(
+  from: DocumentStatus | undefined | null,
+  to: DocumentStatus
+): boolean {
+  // null/undefined → any state is always allowed (initial mount)
+  if (from == null) return true;
+
+  // No-op same-state transitions are fine
+  if (from === to) return true;
+
+  // Terminal state guards
+  if (from === DocumentStatus.Error && to === DocumentStatus.Ready) {
+    console.warn(`[Document State] BLOCKED: ${from} -> ${to} (Error is a terminal failure state; use retryProcessing() to restart)`);
+    return false;
+  }
+  if (from === DocumentStatus.Ready && to === DocumentStatus.Error) {
+    console.warn(`[Document State] BLOCKED: ${from} -> ${to} (Ready is a terminal success state)`);
+    return false;
+  }
+  if (from === DocumentStatus.Ready && PROCESSING_STATES.includes(to)) {
+    console.warn(`[Document State] BLOCKED: ${from} -> ${to} (Ready is a terminal success state)`);
+    return false;
+  }
+
+  // Allow any processing state → Error (legitimate failure path)
+  if (to === DocumentStatus.Error) return true;
+
+  // For forward processing transitions, enforce monotonic order
+  const fromIdx = STATE_ORDER.indexOf(from);
+  const toIdx = STATE_ORDER.indexOf(to);
+  if (fromIdx !== -1 && toIdx !== -1 && toIdx <= fromIdx) {
+    console.warn(`[Document State] BLOCKED: ${from} -> ${to} (non-monotonic transition)`);
+    return false;
+  }
+
+  return true;
+}
 
 interface DocumentContextType {
   /** The currently active document, or null */
@@ -245,13 +310,43 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileToRetryRef = useRef<File | null>(null);
 
+  // Live ref to the current document — used inside setTimeout callbacks to avoid stale closures.
+  const currentDocRef = useRef<Document | null>(null);
+
+  // Timestamp of the last observed status change — used by the progress-aware timeout.
+  const lastProgressTimestampRef = useRef<number>(Date.now());
+
+  // Status captured when the current per-stage timer was armed.
+  // If the pipeline has advanced past this status by the time the timer fires, we skip the Error transition.
+  const timerArmedForStatusRef = useRef<DocumentStatus | null>(null);
+
   const setDocument = useCallback((nextDoc: Document | null | ((prev: Document | null) => Document | null)) => {
     if (typeof nextDoc === "function") {
       console.log("[EVIDENT] setDocument() called with functional update");
+      setDocumentState((prev) => {
+        const next = (nextDoc as (prev: Document | null) => Document | null)(prev);
+        currentDocRef.current = next;
+        return next;
+      });
     } else {
+      // Enforce monotonic state machine before applying any status change
+      const prevStatus = currentDocRef.current?.status;
+      const nextStatus = nextDoc?.status;
+      if (nextDoc !== null && nextStatus !== undefined && nextStatus !== prevStatus) {
+        if (!isValidTransition(prevStatus, nextStatus)) {
+          console.error(
+            `[Document State] Rejected invalid transition: ${prevStatus ?? "null"} -> ${nextStatus}. Document state NOT updated.`
+          );
+          return; // Block the invalid transition
+        }
+        console.log(`[Document State] ${prevStatus ?? "null"} -> ${nextStatus}`);
+        // Advance the progress timestamp whenever the status legitimately changes
+        lastProgressTimestampRef.current = Date.now();
+      }
       console.log("[EVIDENT] setDocument() called with:", nextDoc);
+      currentDocRef.current = nextDoc;
+      setDocumentState(nextDoc);
     }
-    setDocumentState(nextDoc);
   }, []);
 
   // Track status transitions
@@ -297,9 +392,17 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     if (activeId) {
       DocumentService.get(activeId).then(async (restoredDoc) => {
         if (restoredDoc) {
-          if (restoredDoc.originalFile) {
-            restoredDoc.url = URL.createObjectURL(restoredDoc.originalFile);
+          if (restoredDoc.mongoDbId) {
+            // Instantly clear any stale blob URL to prevent rendering failures
+            if (restoredDoc.url && restoredDoc.url.startsWith("blob:")) {
+              restoredDoc.url = restoredDoc.viewerUrl && !restoredDoc.viewerUrl.startsWith("blob:") ? restoredDoc.viewerUrl : undefined;
+            }
+          } else {
+            if (restoredDoc.originalFile) {
+              restoredDoc.url = URL.createObjectURL(restoredDoc.originalFile);
+            }
           }
+          restoredDoc.isNewUpload = false;
           setDocument(restoredDoc);
 
           // Retrieve fresh viewerUrl from backend
@@ -308,7 +411,11 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
               const backendRes = await api.get(`/documents/${restoredDoc.mongoDbId}`).then(res => res.data);
               if (backendRes && backendRes.viewerUrl) {
                 restoredDoc.viewerUrl = backendRes.viewerUrl;
-                await DocumentService.update(restoredDoc.id, { viewerUrl: backendRes.viewerUrl });
+                restoredDoc.url = backendRes.viewerUrl;
+                await DocumentService.update(restoredDoc.id, { 
+                  viewerUrl: backendRes.viewerUrl,
+                  url: backendRes.viewerUrl
+                });
                 setDocument({ ...restoredDoc });
               }
             } catch (e) {
@@ -320,46 +427,113 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     }
   }, [setDocument]);
 
-  // Monitor processing timeout
+  // Progress-aware processing timeout
+  //
+  // This effect re-runs every time the document status changes (i.e., the pipeline advances).
+  // Each time it runs it:
+  //   1. Records the current status as the "armed-for" status.
+  //   2. Starts a fresh PROCESSING_TIMEOUT_MS timer.
+  //   3. When the timer fires, it reads the LIVE document status via currentDocRef
+  //      (not the stale closure value) — if the pipeline has already advanced past
+  //      the armed status, the timeout is a no-op and Error is NOT triggered.
+  //   4. Only fires Error if the pipeline is genuinely stuck in the same stage.
   useEffect(() => {
     if (!document || !PROCESSING_STATES.includes(document.status)) {
-      // Clear timeout if document is not in a processing state
+      // Clear timeout — document is no longer in a processing state (Ready, Error, or null)
       if (timeoutIdRef.current) {
         clearTimeout(timeoutIdRef.current);
         timeoutIdRef.current = null;
       }
+      timerArmedForStatusRef.current = null;
       return;
     }
 
-    // Set timeout for this processing state
+    // Cancel any previous per-stage timer (status has advanced, reset the clock)
     if (timeoutIdRef.current) {
       clearTimeout(timeoutIdRef.current);
+      timeoutIdRef.current = null;
     }
 
-    timeoutIdRef.current = setTimeout(async () => {
-      if (!document) return;
+    // Arm the timer for the CURRENT stage
+    const armedForStatus = document.status;
+    const armedAtTimestamp = Date.now();
+    timerArmedForStatusRef.current = armedForStatus;
 
-      // Transition to Error status
+    console.log(
+      `[Document State] Timeout armed for stage "${armedForStatus}" — will fire Error in ${PROCESSING_TIMEOUT_MS / 1000}s if no progress detected.`
+    );
+
+    timeoutIdRef.current = setTimeout(async () => {
+      // Read LIVE document from ref — avoids stale closure
+      const liveDoc = currentDocRef.current;
+
+      if (!liveDoc) {
+        console.log("[Document State] Timeout fired but document is null — skipping.");
+        return;
+      }
+
+      // If the pipeline has already advanced past the armed stage, this timeout is stale — ignore it.
+      if (liveDoc.status !== armedForStatus) {
+        console.log(
+          `[Document State] Timeout for "${armedForStatus}" ignored — pipeline has already advanced to "${liveDoc.status}".`
+        );
+        return;
+      }
+
+      // If the document has already reached Ready or Error, do nothing.
+      if (
+        liveDoc.status === DocumentStatus.Ready ||
+        liveDoc.status === DocumentStatus.Error
+      ) {
+        console.log(
+          `[Document State] Timeout for "${armedForStatus}" ignored — document is already in terminal state "${liveDoc.status}".`
+        );
+        return;
+      }
+
+      // Check if progress was detected after this timer was armed (e.g., a sub-step completed
+      // but did not trigger a status enum change — e.g. parse progress 50 → 100).
+      const timeSinceLastProgress = Date.now() - lastProgressTimestampRef.current;
+      if (timeSinceLastProgress < PROCESSING_TIMEOUT_MS) {
+        console.log(
+          `[Document State] Timeout for "${armedForStatus}" suppressed — progress detected ${Math.round(timeSinceLastProgress / 1000)}s ago (within threshold).`
+        );
+        return;
+      }
+
+      // Pipeline is genuinely stuck — transition to Error
       const processingError: ProcessingError = {
-        message: `Document processing timed out after ${PROCESSING_TIMEOUT_MS / 1000} seconds while ${document.status.toLowerCase()}`,
+        message: `Document processing timed out after ${PROCESSING_TIMEOUT_MS / 1000} seconds while ${armedForStatus.toLowerCase()}. No stage progress was detected for ${Math.round((Date.now() - armedAtTimestamp) / 1000)} seconds.`,
         code: "PROCESSING_TIMEOUT",
         timestamp: Date.now(),
-        state: document.status,
+        state: armedForStatus,
       };
 
-      const errorDoc = await DocumentService.update(document.id, {
+      console.error(
+        `[Document State] ${armedForStatus} -> Error (timeout after ${PROCESSING_TIMEOUT_MS / 1000}s with no progress)`,
+        processingError.message
+      );
+
+      const errorDoc = await DocumentService.update(liveDoc.id, {
         status: DocumentStatus.Error,
         processingError,
-        processing: { ...document.processing, timedOut: true },
+        processing: { ...liveDoc.processing, timedOut: true },
       });
 
-      setDocument(errorDoc || null);
-      console.error("Processing timeout:", processingError.message);
-      pipelineDebugger.error(
-        processingError.message,
-        "PROCESSING_TIMEOUT",
-        { fileName: document.name, timedOutState: document.status }
-      );
+      // Guard: only apply Error if document is still in the stuck stage
+      // (another async update could have completed while we awaited DocumentService.update)
+      if (currentDocRef.current?.status === armedForStatus) {
+        setDocument(errorDoc || null);
+        pipelineDebugger.error(
+          processingError.message,
+          "PROCESSING_TIMEOUT",
+          { fileName: liveDoc.name, timedOutState: armedForStatus }
+        );
+      } else {
+        console.log(
+          `[Document State] Error transition aborted — pipeline advanced to "${currentDocRef.current?.status}" while awaiting DocumentService.update.`
+        );
+      }
     }, PROCESSING_TIMEOUT_MS);
 
     return () => {
@@ -414,12 +588,15 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         type: file.type,
         extension,
         url: URL.createObjectURL(file),
-        processing: { uploadProgress: 100, overallProgress: 15, startedAt: Date.now() }
+        processing: { uploadProgress: 100, overallProgress: 15, startedAt: Date.now() },
+        isNewUpload: true,
+        lastOpenedAt: new Date().toISOString()
       });
 
       // Set status to Uploading
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.Uploading,
+        isNewUpload: true
       }) || currentDoc;
 
       setDocument(currentDoc);
@@ -522,6 +699,9 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       setDocument(currentDoc);
 
       const content = await ParserService.parseFile(file);
+      console.log(
+        `[Pipeline] Content extraction complete — pages: ${content.textPages?.length ?? 0}, fullText length: ${content.fullText?.length ?? 0}, paragraphs: ${content.paragraphs?.length ?? 0}`
+      );
       pipelineDebugger.parsingCompleted(file.name, content.textPages?.length || 0);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
@@ -558,7 +738,11 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       validateDocumentState(currentDoc, false);
       setDocument(currentDoc);
 
+      console.log(`[Pipeline] Metadata extraction start — file: ${file.name}, type: ${file.type}`);
       const metadata = MetadataService.extractMetadata(file.name, file.size, file.type, content);
+      console.log(
+        `[Pipeline] Metadata extraction complete — wordCount: ${metadata.wordCount ?? 0}, characterCount: ${metadata.characterCount ?? 0}, category: ${metadata.documentCategory}`
+      );
       pipelineDebugger.metadataCompleted(file.name, metadata.wordCount ?? 0, metadata.characterCount ?? 0);
       
       currentDoc = await DocumentService.update(currentDoc.id, {
@@ -596,7 +780,11 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       validateDocumentState(currentDoc, false);
       setDocument(currentDoc);
 
+      console.log(`[Pipeline] Statistics generation start — file: ${file.name}`);
       const statistics = StatisticsService.calculateStatistics(content);
+      console.log(
+        `[Pipeline] Statistics generation complete — words: ${statistics.words ?? 0}, sentences: ${statistics.sentences ?? 0}, paragraphs: ${statistics.paragraphs ?? 0}`
+      );
       pipelineDebugger.statisticsCompleted(file.name, {
         words: statistics.words ?? 0,
         sentences: statistics.sentences ?? 0,
@@ -611,12 +799,39 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       setDocument(currentDoc);
 
       // Step 5: Ready!
+      const nowStr = new Date().toISOString();
       currentDoc = await DocumentService.update(currentDoc.id, {
         status: DocumentStatus.Ready,
         processing: { ...currentDoc.processing, overallProgress: 100, startedAt: undefined },
         processingError: undefined,
+        isNewUpload: false,
+        lastOpenedAt: nowStr,
       }) || currentDoc;
-      validateDocumentState(currentDoc, true);
+
+      if (currentDoc.mongoDbId) {
+        try {
+          await updatePersistedDocument(currentDoc.mongoDbId, {
+            status: "Ready",
+            pages: currentDoc.pages || currentDoc.pagesContent?.length || 1,
+            wordCount: currentDoc.metadata?.wordCount || 0,
+            lastOpenedAt: nowStr,
+          });
+        } catch (syncErr) {
+          console.warn("Failed to sync final document status to MongoDB:", syncErr);
+        }
+      }
+
+      // Use non-strict validation at the Ready stage so that DOCX/TXT files with empty
+      // fullText (e.g. some mammoth edge cases) do not throw and block the Ready state.
+      // Strict issues are logged as warnings only — they never abort the pipeline.
+      const readyValidation = DocumentValidatorService.validateDocument(currentDoc, { strict: false });
+      if (!readyValidation.isValid) {
+        console.error("[Pipeline] Document validation errors at Ready state (non-fatal):", readyValidation.errors);
+      }
+      if (readyValidation.warnings.length > 0) {
+        console.warn("[Pipeline] Document validation warnings at Ready state:", readyValidation.warnings);
+      }
+
       setDocument(currentDoc);
       
       pipelineDebugger.documentReady(file.name, content.textPages?.length || 0);
@@ -739,47 +954,32 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Refresh viewerUrl if found locally and has a MongoDB record
-    if (targetDoc && targetDoc.mongoDbId) {
-      try {
-        const backendRes = await api.get(`/documents/${targetDoc.mongoDbId}`).then(res => res.data);
-        if (backendRes && backendRes.viewerUrl) {
-          targetDoc.viewerUrl = backendRes.viewerUrl;
-          await DocumentService.update(targetDoc.id, { viewerUrl: backendRes.viewerUrl });
-        }
-      } catch (e) {
-        console.warn("Failed to retrieve fresh viewerUrl from backend:", e);
-      }
-    }
-
     if (targetDoc) {
       const nowStr = new Date().toISOString();
       targetDoc.lastOpenedAt = nowStr;
+      targetDoc.isNewUpload = false;
 
-      // If document is not downloaded yet and has S3 details, download it!
-      if (!targetDoc.originalFile && targetDoc.mongoDbId) {
+      if (targetDoc.mongoDbId) {
+        // Persisted cloud document: retrieve fresh viewerUrl and set it as both url and viewerUrl
         try {
-          toast.loading("Downloading file content...", { id: "download-file" });
-          const downloadRes = await fetchDocumentDownloadUrl(targetDoc.mongoDbId);
-          
-          const fileBlob = await fetch(downloadRes.downloadUrl).then(res => {
-            if (!res.ok) throw new Error("Download request failed");
-            return res.blob();
-          });
-          
-          const fileObj = new File([fileBlob], targetDoc.name, { type: targetDoc.type });
-          targetDoc.originalFile = fileObj;
-          targetDoc.url = URL.createObjectURL(fileObj);
-          
-          await DocumentService.restore(targetDoc);
-          toast.success("Document loaded successfully!", { id: "download-file" });
+          const backendRes = await api.get(`/documents/${targetDoc.mongoDbId}`).then(res => res.data);
+          if (backendRes && backendRes.viewerUrl) {
+            targetDoc.viewerUrl = backendRes.viewerUrl;
+            targetDoc.url = backendRes.viewerUrl;
+            await DocumentService.update(targetDoc.id, { 
+              viewerUrl: backendRes.viewerUrl,
+              url: backendRes.viewerUrl
+            });
+          }
         } catch (e) {
-          console.error("Failed to download file from S3:", e);
-          toast.error("Could not load document file from cloud storage.", { id: "download-file" });
+          console.warn("Failed to retrieve fresh viewerUrl from backend:", e);
         }
-      } else if (targetDoc.originalFile && !targetDoc.url) {
-        targetDoc.url = URL.createObjectURL(targetDoc.originalFile);
-        await DocumentService.restore(targetDoc);
+      } else {
+        // Local fallback for local-only non-persisted files
+        if (targetDoc.originalFile && (!targetDoc.url || targetDoc.url.startsWith("blob:"))) {
+          targetDoc.url = URL.createObjectURL(targetDoc.originalFile);
+          await DocumentService.restore(targetDoc);
+        }
       }
 
       // Update lastOpenedAt locally
@@ -804,9 +1004,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
             targetDoc.insights = {
               executiveSummary: res.executiveSummary,
               documentPurpose: res.documentPurpose,
+              readingDifficulty: targetDoc.pages && targetDoc.pages > 10 ? "Advanced" : "Intermediate",
               readingTime: targetDoc.metadata?.estimatedReadingTime ? `${targetDoc.metadata.estimatedReadingTime} min` : "0 min",
               tone: "Professional",
-              facts: res.facts || [],
+              facts: (res.facts || []).map((f: any, idx: number) => ({ id: idx + 1, ...f })),
               entities: {
                 people: res.entities?.people || [],
                 organizations: res.entities?.organizations || [],

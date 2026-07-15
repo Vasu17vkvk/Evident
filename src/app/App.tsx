@@ -22,6 +22,7 @@ import { ExportsPage } from "./components/sections/ExportsPage";
 import { StoragePage } from "./components/sections/StoragePage";
 import { ProfilePage } from "./components/sections/ProfilePage";
 import { SettingsPage } from "./components/sections/SettingsPage";
+import { AnalyticsPage } from "./components/sections/AnalyticsPage";
 import { Toaster } from "./components/ui/sonner";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { MigrationBanner } from "./components/auth/MigrationBanner";
@@ -51,6 +52,7 @@ function AppContent() {
         {/* Protected Workspace Layout Routes (No public marketing header/footer) */}
         <Route element={<ProtectedRoute />}>
           <Route path="/workspace/:documentId" element={<Workspace />} />
+          <Route path="/workspace" element={<DocumentsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/recent" element={<RecentPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
@@ -59,6 +61,9 @@ function AppContent() {
           <Route path="/storage" element={<StoragePage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/analytics/queries" element={<AnalyticsPage type="queries" />} />
+          <Route path="/analytics/citations" element={<AnalyticsPage type="citations" />} />
+          <Route path="/analytics/performance" element={<AnalyticsPage type="performance" />} />
         </Route>
 
         {/* standard pages wrapping header / footer */}

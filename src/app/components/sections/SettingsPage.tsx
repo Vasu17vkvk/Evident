@@ -196,7 +196,7 @@ export function SettingsPage() {
                       <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/30" strokeWidth={1.5} />
                       <input
                         type="email"
-                        value={user.email}
+                        value={user?.email ?? ""}
                         readOnly
                         className="w-full h-11 pl-10 pr-4 bg-[#141414] border border-border text-xs text-muted-foreground/50 cursor-not-allowed focus:outline-none rounded-sm"
                       />

@@ -37,8 +37,12 @@ class InsightsResponse(BaseModel):
     documentId: str
     executiveSummary: str
     documentPurpose: str
+    keyPoints: List[str] = []
+    actionItems: List[str] = []
+    questions: List[str] = []
     facts: List[FactItem] = []
     entities: EntitiesContainer
     timeline: List[TimelineEvent] = []
-    generationTimestamp: datetime
-    modelUsed: str
+    modelUsed: str = ""
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
