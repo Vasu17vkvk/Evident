@@ -1,8 +1,5 @@
 <<<<<<< HEAD
-
-  # Design AI Document Copilot Landing Page
-
-  This is a code bundle for Design AI Document Copilot Landing Page. The original project is available at https://www.figma.com/design/Fhzb4UbCy3UppkYYU3XZYa/Design-AI-Document-Copilot-Landing-Page.
+ # Evident
 
   ## Running the code
 
